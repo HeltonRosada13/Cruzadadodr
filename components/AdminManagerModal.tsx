@@ -1028,21 +1028,21 @@ function AdminManagerModalInner() {
                     <div className="flex flex-wrap gap-2 mb-3">
                       <button
                         type="button"
-                        onClick={() => handleSelectPresetVideo('https://assets.mixkit.co/videos/preview/mixkit-hands-raised-in-a-church-service-41846-large.mp4', 'Louvor & Culto Congregacional')}
+                        onClick={() => handleSelectPresetVideo('https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4', 'Louvor & Culto Congregacional')}
                         className="px-2.5 py-1 rounded-sm bg-neutral-200/70 hover:bg-neutral-300 text-[10px] text-neutral-800 font-medium transition-colors cursor-pointer"
                       >
                         🙏 Louvor & Adoração
                       </button>
                       <button
                         type="button"
-                        onClick={() => handleSelectPresetVideo('https://assets.mixkit.co/videos/preview/mixkit-hands-holding-a-burning-candle-in-the-dark-42482-large.mp4', 'Velas & Vigília de Fé')}
+                        onClick={() => handleSelectPresetVideo('https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4', 'Velas & Vigília de Fé')}
                         className="px-2.5 py-1 rounded-sm bg-neutral-200/70 hover:bg-neutral-300 text-[10px] text-neutral-800 font-medium transition-colors cursor-pointer"
                       >
                         🕯️ Vigília & Oração
                       </button>
                       <button
                         type="button"
-                        onClick={() => handleSelectPresetVideo('https://assets.mixkit.co/videos/preview/mixkit-church-choir-singing-in-service-41848-large.mp4', 'Coral & Celebração')}
+                        onClick={() => handleSelectPresetVideo('https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4', 'Coral & Celebração')}
                         className="px-2.5 py-1 rounded-sm bg-neutral-200/70 hover:bg-neutral-300 text-[10px] text-neutral-800 font-medium transition-colors cursor-pointer"
                       >
                         🎶 Coral & Impacto

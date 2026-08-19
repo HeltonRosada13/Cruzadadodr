@@ -2,7 +2,6 @@
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useChurch } from '@/lib/ChurchContext';
-import { getHeroVideoBlobUrl } from '@/lib/videoStorage';
 import { CountdownTimer } from './CountdownTimer';
 import { isYouTubeVideoUrl, formatYouTubeEmbedUrl } from './VideoGallery';
 import { 
@@ -21,7 +20,6 @@ import {
 import Image from 'next/image';
 
 const DEFAULT_FALLBACK_VIDEO = 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4';
-const SECONDARY_FALLBACK_VIDEO = 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4';
 
 export function Hero() {
   const { data } = useChurch();
@@ -35,7 +33,6 @@ export function Hero() {
   const [isMuted, setIsMuted] = useState(true);
   const [isPlaying, setIsPlaying] = useState(false);
   const [videoError, setVideoError] = useState(false);
-  const [customBlobUrl, setCustomBlobUrl] = useState<string | null>(null);
 
   const safePlay = useCallback(() => {
     const video = videoRef.current;
@@ -93,33 +90,6 @@ export function Hero() {
     }
   }, []);
 
-  // Check stored IndexedDB video blob on mount
-  useEffect(() => {
-    let isMounted = true;
-    
-    getHeroVideoBlobUrl().then((blobUrl) => {
-      if (isMounted && blobUrl) {
-        setCustomBlobUrl(blobUrl);
-        setVideoError(false);
-      }
-    });
-
-    const handleVideoUpdated = (e: Event) => {
-      const customEvent = e as CustomEvent<{ blobUrl: string | null }>;
-      if (customEvent.detail !== undefined) {
-        setCustomBlobUrl(customEvent.detail.blobUrl);
-        setVideoError(false);
-      }
-    };
-
-    window.addEventListener('hero-video-updated', handleVideoUpdated);
-
-    return () => {
-      isMounted = false;
-      window.removeEventListener('hero-video-updated', handleVideoUpdated);
-    };
-  }, []);
-
   const isYouTube = isYouTubeVideoUrl(activity.heroVideo);
   const isWebUrl = 
     activity.heroVideo && 
@@ -129,9 +99,10 @@ export function Hero() {
      activity.heroVideo.startsWith('https://') || 
      activity.heroVideo.startsWith('/'));
 
-  const videoSrc = customBlobUrl || (isWebUrl ? activity.heroVideo : null) || DEFAULT_FALLBACK_VIDEO;
+  // Single unified video source across all devices (Desktop, Mobile Android & iPhone)
+  const videoSrc = (isWebUrl ? activity.heroVideo : null) || DEFAULT_FALLBACK_VIDEO;
 
-  // Imperative video element setup for mobile iOS & Android
+  // Imperative video element setup for mobile iOS & Android & Desktop
   useEffect(() => {
     const video = videoRef.current;
     if (!video || isYouTube) return;
@@ -285,6 +256,7 @@ export function Hero() {
           <video
             ref={videoRef}
             key={videoSrc}
+            src={videoSrc}
             autoPlay
             loop
             muted
@@ -294,9 +266,9 @@ export function Hero() {
             onPlay={() => setIsPlaying(true)}
             onPause={() => setIsPlaying(false)}
             onError={() => {
-              if (videoSrc !== SECONDARY_FALLBACK_VIDEO) {
+              if (videoSrc !== DEFAULT_FALLBACK_VIDEO) {
                 if (videoRef.current) {
-                  videoRef.current.src = SECONDARY_FALLBACK_VIDEO;
+                  videoRef.current.src = DEFAULT_FALLBACK_VIDEO;
                   videoRef.current.load();
                   safePlay();
                 }
@@ -305,10 +277,7 @@ export function Hero() {
               }
             }}
             className="w-full h-full object-cover object-center scale-105 transition-opacity duration-1000 brightness-95"
-          >
-            <source src={videoSrc} type="video/mp4" />
-            <source src={SECONDARY_FALLBACK_VIDEO} type="video/mp4" />
-          </video>
+          />
         ) : (
           <Image
             src={activity.heroImage}
