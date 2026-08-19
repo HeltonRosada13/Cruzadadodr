@@ -325,30 +325,27 @@ export function ChurchProvider({ children }: { children: React.ReactNode }) {
                 return;
               }
 
-              // Intelligently merge videos so locally uploaded videos are not erased
-              const currentLocalVideos = memoryState.videos || [];
-              const remoteVideosList = Array.isArray(remoteData.videos) ? remoteData.videos : initialChurchData.videos;
-              const mergedVideos = [...currentLocalVideos];
-              remoteVideosList.forEach((rv) => {
-                if (!mergedVideos.some((lv) => lv.id === rv.id)) {
-                  mergedVideos.push(rv);
-                }
-              });
+              // Ensure cloud data is the source of truth for all devices
+              const finalPhotos = Array.isArray(remoteData.photos) && remoteData.photos.length > 0
+                ? remoteData.photos
+                : (memoryState.photos && memoryState.photos.length > 0 ? memoryState.photos : initialChurchData.photos);
 
-              // Intelligently merge photos
-              const currentLocalPhotos = memoryState.photos || [];
-              const remotePhotosList = Array.isArray(remoteData.photos) ? remoteData.photos : initialChurchData.photos;
-              const mergedPhotos = [...currentLocalPhotos];
-              remotePhotosList.forEach((rp) => {
-                if (!mergedPhotos.some((lp) => lp.id === rp.id)) {
-                  mergedPhotos.push(rp);
-                }
-              });
+              const finalVideos = Array.isArray(remoteData.videos) && remoteData.videos.length > 0
+                ? remoteData.videos
+                : (memoryState.videos && memoryState.videos.length > 0 ? memoryState.videos : initialChurchData.videos);
 
-              // Preserve local heroVideo if user uploaded a custom file
+              const finalHighlights = Array.isArray(remoteData.highlights) && remoteData.highlights.length > 0
+                ? remoteData.highlights
+                : (memoryState.highlights && memoryState.highlights.length > 0 ? memoryState.highlights : initialChurchData.highlights);
+
+              const finalSchedule = Array.isArray(remoteData.worshipSchedule) && remoteData.worshipSchedule.length > 0
+                ? remoteData.worshipSchedule
+                : (memoryState.worshipSchedule && memoryState.worshipSchedule.length > 0 ? memoryState.worshipSchedule : initialChurchData.worshipSchedule);
+
+              // Preserve local heroVideo if user uploaded a custom file or prioritize remote cloud URL
               const localHeroVideo = memoryState.currentActivity?.heroVideo;
               const remoteHeroVideo = remoteData.currentActivity?.heroVideo;
-              const finalHeroVideo = localHeroVideo || remoteHeroVideo || initialChurchData.currentActivity.heroVideo;
+              const finalHeroVideo = remoteHeroVideo || localHeroVideo || initialChurchData.currentActivity.heroVideo;
 
               const sanitized: ChurchSettings = {
                 ...initialChurchData,
@@ -371,12 +368,12 @@ export function ChurchProvider({ children }: { children: React.ReactNode }) {
                 upcomingEvents: Array.isArray(remoteData.upcomingEvents) && remoteData.upcomingEvents.length > 0 
                   ? remoteData.upcomingEvents 
                   : (memoryState.upcomingEvents || initialChurchData.upcomingEvents),
-                photos: mergedPhotos,
-                videos: mergedVideos,
-                socialLinks: Array.isArray(remoteData.socialLinks) ? remoteData.socialLinks : (memoryState.socialLinks || initialChurchData.socialLinks),
-                highlights: Array.isArray(remoteData.highlights) ? remoteData.highlights : (memoryState.highlights || initialChurchData.highlights),
-                testimonies: Array.isArray(remoteData.testimonies) ? remoteData.testimonies : (memoryState.testimonies || initialChurchData.testimonies),
-                worshipSchedule: Array.isArray(remoteData.worshipSchedule) ? remoteData.worshipSchedule : (memoryState.worshipSchedule || initialChurchData.worshipSchedule),
+                photos: finalPhotos,
+                videos: finalVideos,
+                socialLinks: Array.isArray(remoteData.socialLinks) && remoteData.socialLinks.length > 0 ? remoteData.socialLinks : (memoryState.socialLinks || initialChurchData.socialLinks),
+                highlights: finalHighlights,
+                testimonies: Array.isArray(remoteData.testimonies) && remoteData.testimonies.length > 0 ? remoteData.testimonies : (memoryState.testimonies || initialChurchData.testimonies),
+                worshipSchedule: finalSchedule,
                 developedBy: {
                   ...initialChurchData.developedBy,
                   ...(remoteData.developedBy || {}),
