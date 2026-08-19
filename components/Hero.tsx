@@ -32,7 +32,6 @@ export function Hero() {
   // Start muted to comply strictly with mobile browser autoplay policies
   const [isMuted, setIsMuted] = useState(true);
   const [isPlaying, setIsPlaying] = useState(false);
-  const [videoError, setVideoError] = useState(false);
 
   const safePlay = useCallback(() => {
     const video = videoRef.current;
@@ -252,51 +251,31 @@ export function Hero() {
             allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
             allowFullScreen
           />
-        ) : videoSrc && !videoError ? (
+        ) : (
           <video
             ref={videoRef}
             key={videoSrc}
-            src={videoSrc}
             autoPlay
             loop
             muted
             playsInline
             preload="auto"
-            poster={activity.heroImage}
             onPlay={() => setIsPlaying(true)}
             onPause={() => setIsPlaying(false)}
-            onError={() => {
-              if (videoSrc !== DEFAULT_FALLBACK_VIDEO) {
-                if (videoRef.current) {
-                  videoRef.current.src = DEFAULT_FALLBACK_VIDEO;
-                  videoRef.current.load();
-                  safePlay();
-                }
-              } else {
-                setVideoError(true);
-              }
-            }}
-            className="w-full h-full object-cover object-center scale-105 transition-opacity duration-1000 brightness-95"
-          />
-        ) : (
-          <Image
-            src={activity.heroImage}
-            alt={activity.name}
-            fill
-            priority
-            sizes="100vw"
-            className="object-cover object-center grayscale-[15%]"
-            referrerPolicy="no-referrer"
-          />
+            className="w-full h-full object-cover object-center scale-105 transition-all duration-700"
+          >
+            <source src={videoSrc} type="video/mp4" />
+            <source src="https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4" type="video/mp4" />
+          </video>
         )}
 
-        {/* Balanced Editorial Overlays to keep video clearly visible while text is crisp */}
-        <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/40 to-black/65 z-10 pointer-events-none" />
-        <div className="absolute inset-0 bg-gradient-to-r from-black/65 via-transparent to-black/65 z-10 pointer-events-none" />
+        {/* Balanced Cinematic Overlays - Video is clearly visible and vivid */}
+        <div className="absolute inset-0 bg-black/35 z-10 pointer-events-none" />
+        <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-black/40 z-10 pointer-events-none" />
       </div>
 
       {/* Floating Audio/Play Controls - Visible on both Mobile & Desktop */}
-      {!isYouTube && videoSrc && !videoError && (
+      {!isYouTube && (
         <div className="absolute bottom-4 right-4 sm:bottom-6 sm:right-6 z-30 flex items-center gap-2 bg-black/80 backdrop-blur-md border border-white/20 px-3 py-1.5 rounded-full text-white text-[10px] font-semibold tracking-wider shadow-xl">
           <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse mr-0.5" />
           <span className="uppercase text-neutral-200 text-[9px] sm:text-[10px]">Vídeo Ao Vivo</span>
