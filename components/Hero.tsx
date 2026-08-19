@@ -4,6 +4,7 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useChurch } from '@/lib/ChurchContext';
 import { getHeroVideoBlobUrl } from '@/lib/videoStorage';
 import { CountdownTimer } from './CountdownTimer';
+import { isYouTubeVideoUrl, formatYouTubeEmbedUrl } from './VideoGallery';
 import { 
   ArrowDown, 
   Images, 
@@ -19,8 +20,8 @@ import {
 } from 'lucide-react';
 import Image from 'next/image';
 
-const DEFAULT_FALLBACK_VIDEO = 'https://assets.mixkit.co/videos/preview/mixkit-hands-raised-in-a-church-service-41846-large.mp4';
-const SECONDARY_FALLBACK_VIDEO = 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4';
+const DEFAULT_FALLBACK_VIDEO = 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4';
+const SECONDARY_FALLBACK_VIDEO = 'https://assets.mixkit.co/videos/preview/mixkit-hands-raised-in-a-church-service-41846-large.mp4';
 
 export function Hero() {
   const { data } = useChurch();
@@ -30,8 +31,8 @@ export function Hero() {
   const playPromiseRef = useRef<Promise<void> | null>(null);
   const isHeroVisibleRef = useRef<boolean>(true);
   
-  // Sound is enabled / unmuted by default
-  const [isMuted, setIsMuted] = useState(false);
+  // Start muted to comply with strict iOS Safari and Android Chrome autoplay policies
+  const [isMuted, setIsMuted] = useState(true);
   const [isPlaying, setIsPlaying] = useState(true);
   const [videoError, setVideoError] = useState(false);
   const [customBlobUrl, setCustomBlobUrl] = useState<string | null>(null);
@@ -53,12 +54,10 @@ export function Hero() {
           .catch((err: unknown) => {
             playPromiseRef.current = null;
             if (err instanceof Error && err.name === 'NotAllowedError') {
-              // Browser autoplay policy blocked unmuted play -> start muted and wait for interaction to unmute
+              // Mobile browser policy required mute
               video.muted = true;
               setIsMuted(true);
               video.play().then(() => setIsPlaying(true)).catch(() => {});
-            } else if (err instanceof Error && err.name === 'AbortError') {
-              return;
             }
           });
       } else {
@@ -93,13 +92,8 @@ export function Hero() {
     }
   }, []);
 
-  // Auto unlock and enable sound on first user gesture if browser autoplay policy required initial mute
+  // Unlock and play audio on user gesture on mobile / desktop
   useEffect(() => {
-    const video = videoRef.current;
-    if (video) {
-      video.muted = isMuted;
-    }
-
     const unlockAudio = () => {
       if (videoRef.current) {
         videoRef.current.muted = false;
@@ -113,21 +107,18 @@ export function Hero() {
     window.addEventListener('click', unlockAudio, { once: true });
     window.addEventListener('touchstart', unlockAudio, { once: true });
     window.addEventListener('scroll', unlockAudio, { once: true });
-    window.addEventListener('keydown', unlockAudio, { once: true });
 
     return () => {
       window.removeEventListener('click', unlockAudio);
       window.removeEventListener('touchstart', unlockAudio);
       window.removeEventListener('scroll', unlockAudio);
-      window.removeEventListener('keydown', unlockAudio);
     };
-  }, [isMuted, safePlay]);
+  }, [safePlay]);
 
-  // Check stored IndexedDB video blob on mount and listen to real-time updates
+  // Check stored IndexedDB video blob on mount
   useEffect(() => {
     let isMounted = true;
     
-    // Check persistent IndexedDB on reload
     getHeroVideoBlobUrl().then((blobUrl) => {
       if (isMounted && blobUrl) {
         setCustomBlobUrl(blobUrl);
@@ -151,45 +142,39 @@ export function Hero() {
     };
   }, []);
 
+  const isYouTube = isYouTubeVideoUrl(activity.heroVideo);
   const isWebUrl = 
     activity.heroVideo && 
+    !isYouTube &&
     (activity.heroVideo.startsWith('http://') || 
      activity.heroVideo.startsWith('https://') || 
      activity.heroVideo.startsWith('/'));
 
-  // The video source priority:
-  // 1. Persistent IndexedDB custom blob URL (re-created freshly on reload)
-  // 2. Direct HTTP/HTTPS or local path video URL
-  // 3. Fallback church video (always ensuring a background video is active)
   const videoSrc = customBlobUrl || (isWebUrl ? activity.heroVideo : null) || DEFAULT_FALLBACK_VIDEO;
 
-  // React to videoSrc changes and reload video smoothly if Hero is in view
+  // React to videoSrc changes
   useEffect(() => {
-    if (videoRef.current && videoSrc) {
+    if (videoRef.current && videoSrc && !isYouTube) {
       setVideoError(false);
       videoRef.current.load();
       if (isHeroVisibleRef.current) {
         safePlay();
       }
     }
-  }, [videoSrc, safePlay]);
+  }, [videoSrc, isYouTube, safePlay]);
 
-  // Pause Hero video when user scrolls down to "Pilares da Programação" / "Momentos em Destaque",
-  // and resume only when scrolled back up to the Hero section.
+  // Pause when scrolled past Hero
   useEffect(() => {
     const currentSection = sectionRef.current;
     if (!currentSection) return;
 
-    // IntersectionObserver to detect when Hero section leaves or enters the viewport
     const observer = new IntersectionObserver(
       (entries) => {
         entries.forEach((entry) => {
-          // If Hero is visible on screen (at top)
           if (entry.isIntersecting && entry.intersectionRatio > 0.1) {
             isHeroVisibleRef.current = true;
             safePlay();
           } else {
-            // If scrolled down into Highlights / Pilares / Galeria
             isHeroVisibleRef.current = false;
             safePause();
           }
@@ -203,19 +188,16 @@ export function Hero() {
 
     observer.observe(currentSection);
 
-    // Continuous scroll listener for immediate response on scroll down/up
     const handleScroll = () => {
       const heroHeight = currentSection.offsetHeight || 600;
       const scrollY = window.scrollY || window.pageYOffset || 0;
 
-      // Scrolled past 60% of Hero into Destaques/Pilares -> PAUSE
       if (scrollY > heroHeight * 0.6) {
         if (isHeroVisibleRef.current) {
           isHeroVisibleRef.current = false;
           safePause();
         }
       } else if (scrollY < heroHeight * 0.35) {
-        // Scrolled back near top of Hero -> RESUME
         if (!isHeroVisibleRef.current) {
           isHeroVisibleRef.current = true;
           safePlay();
@@ -223,7 +205,6 @@ export function Hero() {
       }
     };
 
-    // Pause if document/tab is hidden
     const handleVisibilityChange = () => {
       if (document.hidden) {
         safePause();
@@ -274,7 +255,15 @@ export function Hero() {
     >
       {/* Background Video with Cinematic Editorial Dark Gradient Overlays */}
       <div className="absolute inset-0 z-0 overflow-hidden bg-black">
-        {videoSrc && !videoError ? (
+        {isYouTube ? (
+          <iframe
+            src={formatYouTubeEmbedUrl(activity.heroVideo, true) + '&mute=1&controls=0&loop=1&playsinline=1'}
+            title={activity.name}
+            className="w-full h-full border-0 absolute inset-0 pointer-events-none scale-125"
+            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+            allowFullScreen
+          />
+        ) : videoSrc && !videoError ? (
           <video
             ref={videoRef}
             key={videoSrc}
@@ -317,11 +306,11 @@ export function Hero() {
         <div className="absolute inset-0 bg-gradient-to-r from-black/65 via-transparent to-black/65 z-10 pointer-events-none" />
       </div>
 
-      {/* Subtle Bottom-Right Floating Audio/Play Controls for Visitors */}
-      {videoSrc && !videoError && (
-        <div className="absolute bottom-6 right-6 z-30 hidden sm:flex items-center gap-2 bg-black/75 backdrop-blur-md border border-white/20 px-3.5 py-1.5 rounded-full text-white text-[10px] font-semibold tracking-wider shadow-xl">
-          <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse mr-1" />
-          <span className="uppercase text-neutral-200">Vídeo Ao Vivo</span>
+      {/* Floating Audio/Play Controls - Visible on both Mobile & Desktop */}
+      {!isYouTube && videoSrc && !videoError && (
+        <div className="absolute bottom-4 right-4 sm:bottom-6 sm:right-6 z-30 flex items-center gap-2 bg-black/80 backdrop-blur-md border border-white/20 px-3 py-1.5 rounded-full text-white text-[10px] font-semibold tracking-wider shadow-xl">
+          <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse mr-0.5" />
+          <span className="uppercase text-neutral-200 text-[9px] sm:text-[10px]">Vídeo Ao Vivo</span>
           <div className="w-[1px] h-3 bg-white/20 mx-1" />
           
           <button
@@ -336,7 +325,7 @@ export function Hero() {
           <button
             onClick={toggleSound}
             aria-label={isMuted ? 'Ativar som' : 'Silenciar som'}
-            className={`px-2.5 py-1 rounded-full transition-all cursor-pointer flex items-center gap-1.5 font-bold text-[10px] ${
+            className={`px-2.5 py-1 rounded-full transition-all cursor-pointer flex items-center gap-1.5 font-bold text-[9px] sm:text-[10px] ${
               !isMuted 
                 ? 'bg-[#C5A059] text-white shadow-md ring-2 ring-[#C5A059]/40' 
                 : 'bg-white/15 text-neutral-200 hover:text-white hover:bg-white/25 border border-white/20'
@@ -346,12 +335,12 @@ export function Hero() {
             {isMuted ? (
               <>
                 <VolumeX className="w-3.5 h-3.5" />
-                <span className="text-[9px] uppercase tracking-wider">Ativar Som</span>
+                <span className="uppercase tracking-wider">Ativar Som</span>
               </>
             ) : (
               <>
                 <Volume2 className="w-3.5 h-3.5 animate-pulse text-white" />
-                <span className="text-[9px] uppercase tracking-wider font-extrabold text-white">Som Ativo</span>
+                <span className="uppercase tracking-wider font-extrabold text-white">Som Ativo</span>
               </>
             )}
           </button>

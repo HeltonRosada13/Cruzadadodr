@@ -23,7 +23,7 @@ import {
 } from 'lucide-react';
 import Image from 'next/image';
 
-const FALLBACK_STREAM_VIDEO = 'https://assets.mixkit.co/videos/preview/mixkit-hands-raised-in-a-church-service-41846-large.mp4';
+const FALLBACK_STREAM_VIDEO = 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4';
 
 export function isYouTubeVideoUrl(url: string | undefined | null): boolean {
   if (!url) return false;
@@ -34,11 +34,11 @@ export function isYouTubeVideoUrl(url: string | undefined | null): boolean {
   );
 }
 
-export function formatYouTubeEmbedUrl(url: string, autoPlay = false): string {
+export function formatYouTubeEmbedUrl(url: string | undefined | null, autoPlay = false): string {
   if (!url) return '';
   const ytMatch = url.match(/(?:youtu\.be\/|youtube\.com\/(?:embed\/|v\/|watch\?v=|watch\?.+&v=)|youtube-nocookie\.com\/embed\/)([\w-]{11})/);
   if (ytMatch && ytMatch[1]) {
-    return `https://www.youtube-nocookie.com/embed/${ytMatch[1]}?autoplay=${autoPlay ? 1 : 0}&rel=0&modestbranding=1`;
+    return `https://www.youtube-nocookie.com/embed/${ytMatch[1]}?autoplay=${autoPlay ? 1 : 0}&playsinline=1&enablejsapi=1&rel=0&modestbranding=1`;
   }
   return url;
 }
@@ -52,8 +52,8 @@ export function VideoGallery() {
   const [isAutoPlayingCarousel, setIsAutoPlayingCarousel] = useState(false);
   const [copied, setCopied] = useState(false);
   
-  // Sound is enabled / unmuted by default
-  const [isInlineMuted, setIsInlineMuted] = useState(false);
+  // Start muted to comply with iOS Safari and Android Chrome autoplay restrictions
+  const [isInlineMuted, setIsInlineMuted] = useState(true);
   const [isInlinePlaying, setIsInlinePlaying] = useState(false);
   const [videoErrorMap, setVideoErrorMap] = useState<Record<string, boolean>>({});
   
