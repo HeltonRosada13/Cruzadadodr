@@ -10,6 +10,7 @@ export type SyncState = 'synced' | 'syncing' | 'offline' | 'quota_exceeded' | 'r
 
 interface ChurchContextType {
   data: ChurchSettings;
+  isReady: boolean;
   updateCurrentActivity: (activity: Partial<ChurchActivity>) => void;
   updateChurchInfo: (info: Partial<ChurchSettings>) => void;
   addPhoto: (photo: Omit<PhotoItem, 'id'>) => void;
@@ -278,11 +279,19 @@ function updateChurchStore(updater: (prev: ChurchSettings) => ChurchSettings) {
 
 const ChurchContext = createContext<ChurchContextType | undefined>(undefined);
 
+const emptySubscribe = () => () => {};
+
 export function ChurchProvider({ children }: { children: React.ReactNode }) {
   const data = useSyncExternalStore(
     subscribeChurchStore,
     getChurchSnapshot,
     getServerChurchSnapshot
+  );
+
+  const isReady = useSyncExternalStore(
+    emptySubscribe,
+    () => true,
+    () => false
   );
 
   const [isAdminOpen, setIsAdminOpen] = useState(false);
@@ -756,6 +765,7 @@ export function ChurchProvider({ children }: { children: React.ReactNode }) {
     <ChurchContext.Provider
       value={{
         data,
+        isReady,
         updateCurrentActivity,
         updateChurchInfo,
         addPhoto,
