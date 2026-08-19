@@ -148,12 +148,11 @@ export function VideoGallery() {
       return persistentBlobMap[video.id];
     }
 
-    // 3. Direct http/https MP4 stream URL
-    if (!video.videoUrl.startsWith('blob:')) {
+    // 3. Direct URL (including live blob: URL or http/https)
+    if (video.videoUrl) {
       return video.videoUrl;
     }
 
-    // 4. Temporary / expired blob URL fallback until IndexedDB is hydrated
     return FALLBACK_STREAM_VIDEO;
   };
 

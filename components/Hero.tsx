@@ -2,6 +2,7 @@
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useChurch } from '@/lib/ChurchContext';
+import { getHeroVideoBlobUrl } from '@/lib/videoStorage';
 import { CountdownTimer } from './CountdownTimer';
 import { isYouTubeVideoUrl, formatYouTubeEmbedUrl } from './VideoGallery';
 import { 
@@ -32,6 +33,31 @@ export function Hero() {
   // Start muted to comply strictly with mobile browser autoplay policies
   const [isMuted, setIsMuted] = useState(true);
   const [isPlaying, setIsPlaying] = useState(false);
+  const [customBlobUrl, setCustomBlobUrl] = useState<string | null>(null);
+
+  // Hydrate local video blob on mount or when uploaded
+  useEffect(() => {
+    let isMounted = true;
+    getHeroVideoBlobUrl().then((blobUrl) => {
+      if (isMounted && blobUrl) {
+        setCustomBlobUrl(blobUrl);
+      }
+    });
+
+    const handleVideoUpdated = (e: Event) => {
+      const customEvent = e as CustomEvent<{ blobUrl: string | null }>;
+      if (customEvent.detail !== undefined) {
+        setCustomBlobUrl(customEvent.detail.blobUrl);
+      }
+    };
+
+    window.addEventListener('hero-video-updated', handleVideoUpdated);
+
+    return () => {
+      isMounted = false;
+      window.removeEventListener('hero-video-updated', handleVideoUpdated);
+    };
+  }, []);
 
   const safePlay = useCallback(() => {
     const video = videoRef.current;
@@ -89,17 +115,9 @@ export function Hero() {
     }
   }, []);
 
-  const isYouTube = isYouTubeVideoUrl(activity.heroVideo);
-  const isWebUrl = 
-    activity.heroVideo && 
-    !isYouTube &&
-    !activity.heroVideo.startsWith('blob:') &&
-    (activity.heroVideo.startsWith('http://') || 
-     activity.heroVideo.startsWith('https://') || 
-     activity.heroVideo.startsWith('/'));
-
-  // Single unified video source across all devices (Desktop, Mobile Android & iPhone)
-  const videoSrc = (isWebUrl ? activity.heroVideo : null) || DEFAULT_FALLBACK_VIDEO;
+  const rawVideo = customBlobUrl || activity.heroVideo;
+  const isYouTube = isYouTubeVideoUrl(rawVideo);
+  const videoSrc = (rawVideo && !isYouTube ? rawVideo : null) || DEFAULT_FALLBACK_VIDEO;
 
   // Imperative video element setup for mobile iOS & Android & Desktop
   useEffect(() => {

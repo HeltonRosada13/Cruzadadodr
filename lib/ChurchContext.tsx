@@ -116,9 +116,9 @@ function sanitizeSavedData(savedRaw: string): ChurchSettings {
     );
     const parsed = JSON.parse(cleaned);
     
-    // Fix heroVideo if it is a broken blob or mixkit link
+    // Fix heroVideo if it is a mixkit link
     let sanitizedHeroVideo = parsed.currentActivity?.heroVideo;
-    if (!sanitizedHeroVideo || sanitizedHeroVideo.includes('mixkit.co') || (sanitizedHeroVideo.startsWith('blob:') && typeof window !== 'undefined')) {
+    if (!sanitizedHeroVideo || sanitizedHeroVideo.includes('mixkit.co')) {
       sanitizedHeroVideo = initialChurchData.currentActivity.heroVideo;
     }
 
