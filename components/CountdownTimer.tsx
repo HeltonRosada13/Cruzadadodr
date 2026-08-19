@@ -46,13 +46,30 @@ function getTimeDifference(targetDateString: string, nowMs: number) {
   };
 }
 
+let cachedClientTime = typeof window !== 'undefined' ? Date.now() : 0;
+const timeListeners = new Set<() => void>();
+let timeIntervalId: ReturnType<typeof setInterval> | null = null;
+
 function subscribeTime(onStoreChange: () => void) {
-  const intervalId = setInterval(onStoreChange, 1000);
-  return () => clearInterval(intervalId);
+  timeListeners.add(onStoreChange);
+  if (!timeIntervalId && typeof window !== 'undefined') {
+    cachedClientTime = Date.now();
+    timeIntervalId = setInterval(() => {
+      cachedClientTime = Date.now();
+      timeListeners.forEach((listener) => listener());
+    }, 1000);
+  }
+  return () => {
+    timeListeners.delete(onStoreChange);
+    if (timeListeners.size === 0 && timeIntervalId) {
+      clearInterval(timeIntervalId);
+      timeIntervalId = null;
+    }
+  };
 }
 
 function getClientSnapshot(): number {
-  return Date.now();
+  return cachedClientTime;
 }
 
 function getServerSnapshot(): number {
