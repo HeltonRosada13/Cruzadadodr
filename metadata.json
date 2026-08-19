@@ -1,0 +1,6 @@
+{
+  "name": "Igreja Catedral de Amor e Fé",
+  "description": "Portal oficial e divulgação de atividades, fotos, vídeos e canais da Igreja Catedral de Amor e Fé. Desenvolvido por Baobá Universe.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

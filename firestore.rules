@@ -1,0 +1,25 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Church configuration and all editable content
+    match /church_data/{docId} {
+      allow read: if true;
+      allow write: if true;
+    }
+
+    // Volunteer registrations
+    match /volunteers/{volunteerId} {
+      allow read, write: if true;
+    }
+
+    // Prayer requests
+    match /prayer_requests/{requestId} {
+      allow read, write: if true;
+    }
+
+    // General fallback for all collections in the project
+    match /{document=**} {
+      allow read, write: if true;
+    }
+  }
+}

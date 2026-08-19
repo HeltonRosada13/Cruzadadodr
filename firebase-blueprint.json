@@ -1,0 +1,64 @@
+{
+  "entities": {
+    "ChurchData": {
+      "title": "Church Data Document",
+      "description": "Stores all persistent data, activities, schedule, pastorate, gallery, and settings for Catedral de Amor e Fé",
+      "type": "object",
+      "properties": {
+        "churchInfo": { "type": "object", "description": "General church details" },
+        "currentActivity": { "type": "object", "description": "Current main activity with dates, location, images and video" },
+        "highlights": { "type": "array", "description": "Pillars and highlighted moments" },
+        "schedule": { "type": "array", "description": "Event programming schedule" },
+        "pastors": { "type": "array", "description": "Leadership and pastoral team" },
+        "gallery": { "type": "array", "description": "Photo gallery items" },
+        "videos": { "type": "array", "description": "Video gallery transmissions" },
+        "donations": { "type": "object", "description": "Bank and transfer details" },
+        "contact": { "type": "object", "description": "Contact info and directions" },
+        "socialLinks": { "type": "object", "description": "Social media links" },
+        "updatedAt": { "type": "string", "description": "Timestamp of last edit" }
+      },
+      "required": ["churchInfo", "currentActivity"]
+    },
+    "Volunteer": {
+      "title": "Volunteer Signup",
+      "description": "Volunteer registration submissions for church activities",
+      "type": "object",
+      "properties": {
+        "fullName": { "type": "string" },
+        "phone": { "type": "string" },
+        "email": { "type": "string" },
+        "ministry": { "type": "string" },
+        "experience": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["fullName", "phone", "ministry"]
+    },
+    "PrayerRequest": {
+      "title": "Prayer Request",
+      "description": "Prayer requests submitted by visitors and members",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "prayerSubject": { "type": "string" },
+        "description": { "type": "string" },
+        "isConfidential": { "type": "boolean" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["name", "prayerSubject"]
+    }
+  },
+  "firestore": {
+    "/church_data/{docId}": {
+      "schema": "ChurchData",
+      "description": "Main church settings and content document (docId='main')"
+    },
+    "/volunteers/{volunteerId}": {
+      "schema": "Volunteer",
+      "description": "Volunteer submissions"
+    },
+    "/prayer_requests/{requestId}": {
+      "schema": "PrayerRequest",
+      "description": "Prayer requests"
+    }
+  }
+}
