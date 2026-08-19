@@ -106,11 +106,22 @@ let onQuotaStateChange: ((exceeded: boolean) => void) | null = null;
 
 function sanitizeSavedData(savedRaw: string): ChurchSettings {
   try {
-    const cleaned = savedRaw.replace(
+    let cleaned = savedRaw.replace(
       /photo-1532629345422-7515f3d16bb7/g,
       'photo-1519834785169-98be25ec3f84'
     );
+    cleaned = cleaned.replace(
+      /https:\/\/assets\.mixkit\.co\/videos\/preview\/[^\"]+/g,
+      'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4'
+    );
     const parsed = JSON.parse(cleaned);
+    
+    // Fix heroVideo if it is a broken blob or mixkit link
+    let sanitizedHeroVideo = parsed.currentActivity?.heroVideo;
+    if (!sanitizedHeroVideo || sanitizedHeroVideo.includes('mixkit.co') || (sanitizedHeroVideo.startsWith('blob:') && typeof window !== 'undefined')) {
+      sanitizedHeroVideo = initialChurchData.currentActivity.heroVideo;
+    }
+
     return {
       ...initialChurchData,
       ...parsed,
@@ -126,6 +137,7 @@ function sanitizeSavedData(savedRaw: string): ChurchSettings {
       currentActivity: {
         ...initialChurchData.currentActivity,
         ...(parsed.currentActivity || {}),
+        heroVideo: sanitizedHeroVideo,
       },
       upcomingEvents: Array.isArray(parsed.upcomingEvents) ? parsed.upcomingEvents : initialChurchData.upcomingEvents,
       photos: Array.isArray(parsed.photos) ? parsed.photos : initialChurchData.photos,

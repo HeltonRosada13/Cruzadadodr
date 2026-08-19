@@ -21,7 +21,7 @@ import {
 import Image from 'next/image';
 
 const DEFAULT_FALLBACK_VIDEO = 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4';
-const SECONDARY_FALLBACK_VIDEO = 'https://assets.mixkit.co/videos/preview/mixkit-hands-raised-in-a-church-service-41846-large.mp4';
+const SECONDARY_FALLBACK_VIDEO = 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4';
 
 export function Hero() {
   const { data } = useChurch();
@@ -31,9 +31,9 @@ export function Hero() {
   const playPromiseRef = useRef<Promise<void> | null>(null);
   const isHeroVisibleRef = useRef<boolean>(true);
   
-  // Start muted to comply with strict iOS Safari and Android Chrome autoplay policies
+  // Start muted to comply strictly with mobile browser autoplay policies
   const [isMuted, setIsMuted] = useState(true);
-  const [isPlaying, setIsPlaying] = useState(true);
+  const [isPlaying, setIsPlaying] = useState(false);
   const [videoError, setVideoError] = useState(false);
   const [customBlobUrl, setCustomBlobUrl] = useState<string | null>(null);
 
@@ -43,6 +43,9 @@ export function Hero() {
 
     try {
       video.muted = isMuted;
+      video.defaultMuted = true;
+      video.playsInline = true;
+      
       const promise = video.play();
       if (promise !== undefined) {
         playPromiseRef.current = promise;
@@ -53,12 +56,10 @@ export function Hero() {
           })
           .catch((err: unknown) => {
             playPromiseRef.current = null;
-            if (err instanceof Error && err.name === 'NotAllowedError') {
-              // Mobile browser policy required mute
-              video.muted = true;
-              setIsMuted(true);
-              video.play().then(() => setIsPlaying(true)).catch(() => {});
-            }
+            // If browser autoplay policy restricted play -> ensure muted and retry
+            video.muted = true;
+            setIsMuted(true);
+            video.play().then(() => setIsPlaying(true)).catch(() => {});
           });
       } else {
         setIsPlaying(true);
@@ -92,29 +93,6 @@ export function Hero() {
     }
   }, []);
 
-  // Unlock and play audio on user gesture on mobile / desktop
-  useEffect(() => {
-    const unlockAudio = () => {
-      if (videoRef.current) {
-        videoRef.current.muted = false;
-        setIsMuted(false);
-        if (isHeroVisibleRef.current && videoRef.current.paused) {
-          safePlay();
-        }
-      }
-    };
-
-    window.addEventListener('click', unlockAudio, { once: true });
-    window.addEventListener('touchstart', unlockAudio, { once: true });
-    window.addEventListener('scroll', unlockAudio, { once: true });
-
-    return () => {
-      window.removeEventListener('click', unlockAudio);
-      window.removeEventListener('touchstart', unlockAudio);
-      window.removeEventListener('scroll', unlockAudio);
-    };
-  }, [safePlay]);
-
   // Check stored IndexedDB video blob on mount
   useEffect(() => {
     let isMounted = true;
@@ -146,22 +124,58 @@ export function Hero() {
   const isWebUrl = 
     activity.heroVideo && 
     !isYouTube &&
+    !activity.heroVideo.startsWith('blob:') &&
     (activity.heroVideo.startsWith('http://') || 
      activity.heroVideo.startsWith('https://') || 
      activity.heroVideo.startsWith('/'));
 
   const videoSrc = customBlobUrl || (isWebUrl ? activity.heroVideo : null) || DEFAULT_FALLBACK_VIDEO;
 
-  // React to videoSrc changes
+  // Imperative video element setup for mobile iOS & Android
   useEffect(() => {
-    if (videoRef.current && videoSrc && !isYouTube) {
-      setVideoError(false);
-      videoRef.current.load();
+    const video = videoRef.current;
+    if (!video || isYouTube) return;
+
+    video.muted = isMuted;
+    video.defaultMuted = true;
+    video.playsInline = true;
+    video.setAttribute('muted', '');
+    video.setAttribute('playsinline', 'true');
+    video.setAttribute('webkit-playsinline', 'true');
+
+    const handleCanPlay = () => {
       if (isHeroVisibleRef.current) {
         safePlay();
       }
+    };
+
+    video.addEventListener('canplay', handleCanPlay);
+    video.addEventListener('loadeddata', handleCanPlay);
+
+    // Initial play attempt
+    if (isHeroVisibleRef.current) {
+      safePlay();
     }
-  }, [videoSrc, isYouTube, safePlay]);
+
+    // Force play on first touch/tap on mobile screen
+    const unlockAndPlay = () => {
+      if (videoRef.current && videoRef.current.paused) {
+        safePlay();
+      }
+    };
+
+    window.addEventListener('touchstart', unlockAndPlay, { passive: true, once: true });
+    window.addEventListener('click', unlockAndPlay, { passive: true, once: true });
+    window.addEventListener('scroll', unlockAndPlay, { passive: true, once: true });
+
+    return () => {
+      video.removeEventListener('canplay', handleCanPlay);
+      video.removeEventListener('loadeddata', handleCanPlay);
+      window.removeEventListener('touchstart', unlockAndPlay);
+      window.removeEventListener('click', unlockAndPlay);
+      window.removeEventListener('scroll', unlockAndPlay);
+    };
+  }, [videoSrc, isMuted, isYouTube, safePlay]);
 
   // Pause when scrolled past Hero
   useEffect(() => {
@@ -226,8 +240,12 @@ export function Hero() {
   const toggleSound = (e?: React.MouseEvent) => {
     e?.stopPropagation();
     if (videoRef.current) {
-      videoRef.current.muted = !isMuted;
-      setIsMuted(!isMuted);
+      const nextMuted = !isMuted;
+      videoRef.current.muted = nextMuted;
+      setIsMuted(nextMuted);
+      if (videoRef.current.paused) {
+        safePlay();
+      }
     }
   };
 
@@ -267,10 +285,9 @@ export function Hero() {
           <video
             ref={videoRef}
             key={videoSrc}
-            src={videoSrc}
             autoPlay
             loop
-            muted={isMuted}
+            muted
             playsInline
             preload="auto"
             poster={activity.heroImage}
@@ -288,7 +305,10 @@ export function Hero() {
               }
             }}
             className="w-full h-full object-cover object-center scale-105 transition-opacity duration-1000 brightness-95"
-          />
+          >
+            <source src={videoSrc} type="video/mp4" />
+            <source src={SECONDARY_FALLBACK_VIDEO} type="video/mp4" />
+          </video>
         ) : (
           <Image
             src={activity.heroImage}
