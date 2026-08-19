@@ -4,6 +4,7 @@ import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import { useChurch } from '@/lib/ChurchContext';
 import { VideoItem } from '@/lib/types';
 import { getVideoFileBlobUrl, getAllStoredVideoBlobUrls } from '@/lib/videoStorage';
+import { isYouTubeVideoUrl, formatYouTubeEmbedUrl } from '@/lib/utils';
 import { 
   Play, 
   Pause,
@@ -14,34 +15,18 @@ import {
   Clock, 
   Calendar, 
   Sparkles, 
-  ExternalLink,
-  Share2,
-  Check,
-  Volume2,
-  VolumeX,
-  Maximize2
+  ExternalLink, 
+  Share2, 
+  Check, 
+  Volume2, 
+  VolumeX, 
+  Maximize2 
 } from 'lucide-react';
 import Image from 'next/image';
 
 const FALLBACK_STREAM_VIDEO = 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4';
 
-export function isYouTubeVideoUrl(url: string | undefined | null): boolean {
-  if (!url) return false;
-  return (
-    url.includes('youtube.com') ||
-    url.includes('youtu.be') ||
-    url.includes('youtube-nocookie.com')
-  );
-}
-
-export function formatYouTubeEmbedUrl(url: string | undefined | null, autoPlay = false): string {
-  if (!url) return '';
-  const ytMatch = url.match(/(?:youtu\.be\/|youtube\.com\/(?:embed\/|v\/|watch\?v=|watch\?.+&v=)|youtube-nocookie\.com\/embed\/)([\w-]{11})/);
-  if (ytMatch && ytMatch[1]) {
-    return `https://www.youtube-nocookie.com/embed/${ytMatch[1]}?autoplay=${autoPlay ? 1 : 0}&playsinline=1&enablejsapi=1&rel=0&modestbranding=1`;
-  }
-  return url;
-}
+export { isYouTubeVideoUrl, formatYouTubeEmbedUrl };
 
 export function VideoGallery() {
   const { data } = useChurch();

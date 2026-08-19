@@ -46,39 +46,21 @@ function getTimeDifference(targetDateString: string, nowMs: number) {
   };
 }
 
-let currentClientTime = typeof window !== 'undefined' ? Date.now() : 0;
-const timerListeners = new Set<() => void>();
-let timerInterval: ReturnType<typeof setInterval> | null = null;
-
-function subscribeTimer(callback: () => void) {
-  timerListeners.add(callback);
-  if (!timerInterval && typeof window !== 'undefined') {
-    // Initial sync
-    currentClientTime = Date.now();
-    timerInterval = setInterval(() => {
-      currentClientTime = Date.now();
-      timerListeners.forEach((listener) => listener());
-    }, 1000);
-  }
-  return () => {
-    timerListeners.delete(callback);
-    if (timerListeners.size === 0 && timerInterval) {
-      clearInterval(timerInterval);
-      timerInterval = null;
-    }
-  };
+function subscribeTime(onStoreChange: () => void) {
+  const intervalId = setInterval(onStoreChange, 1000);
+  return () => clearInterval(intervalId);
 }
 
-function getClientTime() {
-  return currentClientTime;
+function getClientSnapshot(): number {
+  return Date.now();
 }
 
-function getServerTime() {
+function getServerSnapshot(): number {
   return 0;
 }
 
 export function CountdownTimer({ targetDateString }: CountdownTimerProps) {
-  const currentTime = useSyncExternalStore(subscribeTimer, getClientTime, getServerTime);
+  const currentTime = useSyncExternalStore(subscribeTime, getClientSnapshot, getServerSnapshot);
   const mounted = currentTime > 0;
   const timeLeft = getTimeDifference(targetDateString, currentTime);
 

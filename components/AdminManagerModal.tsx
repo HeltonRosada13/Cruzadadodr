@@ -385,12 +385,13 @@ function AdminManagerModalInner() {
     };
     setActivityForm(newActivity);
     updateCurrentActivity(newActivity);
+    syncNowWithCloud();
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent('hero-video-updated', { detail: { blobUrl: null } }));
     }
     setUploadedVideoName(name);
     setUploadedVideoSize(null);
-    showNotification(`Vídeo "${name}" selecionado e aplicado à página!`);
+    showNotification(`Vídeo "${name}" selecionado e sincronizado com todos os telemóveis e computadores!`);
   };
 
   const handleSaveActivity = (e: React.FormEvent) => {
@@ -1019,37 +1020,52 @@ function AdminManagerModalInner() {
                   )}
 
                   {/* Presets and URL Fallback Option */}
-                  <div className="pt-2 border-t border-neutral-200">
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="text-[10px] font-bold uppercase tracking-widest text-neutral-600">
-                        Vídeos Sugeridos da Igreja (1-Clique):
+                  <div className="pt-3 border-t border-neutral-200 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-bold uppercase tracking-widest text-neutral-800 flex items-center gap-1.5">
+                        <Sparkles className="w-3.5 h-3.5 text-[#C5A059]" />
+                        Vídeos Oficiais em Nuvem (Sincronização Instantânea em Todos os Telemóveis):
                       </span>
                     </div>
-                    <div className="flex flex-wrap gap-2 mb-3">
-                      <button
-                        type="button"
-                        onClick={() => handleSelectPresetVideo('https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4', 'Louvor & Culto Congregacional')}
-                        className="px-2.5 py-1 rounded-sm bg-neutral-200/70 hover:bg-neutral-300 text-[10px] text-neutral-800 font-medium transition-colors cursor-pointer"
-                      >
-                        🙏 Louvor & Adoração
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleSelectPresetVideo('https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4', 'Velas & Vigília de Fé')}
-                        className="px-2.5 py-1 rounded-sm bg-neutral-200/70 hover:bg-neutral-300 text-[10px] text-neutral-800 font-medium transition-colors cursor-pointer"
-                      >
-                        🕯️ Vigília & Oração
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleSelectPresetVideo('https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4', 'Coral & Celebração')}
-                        className="px-2.5 py-1 rounded-sm bg-neutral-200/70 hover:bg-neutral-300 text-[10px] text-neutral-800 font-medium transition-colors cursor-pointer"
-                      >
-                        🎶 Coral & Impacto
-                      </button>
+
+                    <div className="p-2.5 bg-neutral-100/70 border border-neutral-200 rounded-sm">
+                      <p className="text-[10px] text-neutral-600 font-light mb-2">
+                        💡 <strong>Sincronização Global</strong>: Ao escolher qualquer vídeo abaixo ou inserir um link do YouTube / MP4, a alteração é aplicada <strong>imediatamente em todos os telemóveis e computadores</strong> sem necessidade de publicar em cada aparelho separadamente.
+                      </p>
+                      
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => handleSelectPresetVideo('https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4', 'Louvor & Culto Congregacional')}
+                          className="px-2 py-1.5 rounded-sm bg-white hover:bg-[#C5A059] hover:text-white border border-neutral-300 text-[10px] text-neutral-800 font-semibold transition-all cursor-pointer text-center"
+                        >
+                          🙏 Louvor & Adoração
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleSelectPresetVideo('https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4', 'Velas & Vigília de Fé')}
+                          className="px-2 py-1.5 rounded-sm bg-white hover:bg-[#C5A059] hover:text-white border border-neutral-300 text-[10px] text-neutral-800 font-semibold transition-all cursor-pointer text-center"
+                        >
+                          🕯️ Vigília & Oração
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleSelectPresetVideo('https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4', 'Coral & Celebração')}
+                          className="px-2 py-1.5 rounded-sm bg-white hover:bg-[#C5A059] hover:text-white border border-neutral-300 text-[10px] text-neutral-800 font-semibold transition-all cursor-pointer text-center"
+                        >
+                          🎶 Coral & Impacto
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleSelectPresetVideo('https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4', 'Cruzada & Evangelismo')}
+                          className="px-2 py-1.5 rounded-sm bg-white hover:bg-[#C5A059] hover:text-white border border-neutral-300 text-[10px] text-neutral-800 font-semibold transition-all cursor-pointer text-center"
+                        >
+                          🔥 Cruzada & Fé
+                        </button>
+                      </div>
                     </div>
 
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 pt-1">
                       <input
                         type="url"
                         value={activityForm.heroVideo || ''}
@@ -1060,8 +1076,8 @@ function AdminManagerModalInner() {
                             updateCurrentActivity({ heroVideo: url });
                           }
                         }}
-                        placeholder="Ou cole a URL direta de um vídeo (.mp4, .webm ou YouTube)"
-                        className="flex-1 px-3 py-1.5 rounded-sm bg-white border border-neutral-300 text-[11px] text-neutral-900 focus:outline-none focus:border-black"
+                        placeholder="Ou cole a URL direta de um vídeo (.mp4, .webm ou YouTube https://youtu.be/...)"
+                        className="flex-1 px-3 py-2 rounded-sm bg-white border border-neutral-300 text-xs text-neutral-900 focus:outline-none focus:border-black"
                       />
                     </div>
                   </div>

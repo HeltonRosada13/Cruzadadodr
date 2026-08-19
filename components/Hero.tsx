@@ -4,7 +4,7 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useChurch } from '@/lib/ChurchContext';
 import { getHeroVideoBlobUrl } from '@/lib/videoStorage';
 import { CountdownTimer } from './CountdownTimer';
-import { isYouTubeVideoUrl, formatYouTubeEmbedUrl } from './VideoGallery';
+import { isYouTubeVideoUrl, formatYouTubeEmbedUrl } from '@/lib/utils';
 import { 
   ArrowDown, 
   Images, 

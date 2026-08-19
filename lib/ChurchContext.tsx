@@ -307,12 +307,6 @@ export function ChurchProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     let unsubscribe: (() => void) | undefined;
 
-    // If quota was already recorded as exceeded, stay in local offline mode and don't spam network
-    if (checkIsQuotaExceededStored()) {
-      isFirestoreQuotaExceeded = true;
-      return;
-    }
-
     try {
       const mainDocRef = doc(db, FIRESTORE_DOC_PATH, FIRESTORE_DOC_ID);
       
@@ -325,66 +319,40 @@ export function ChurchProvider({ children }: { children: React.ReactNode }) {
               const remoteTs = typeof remoteData.editTimestamp === 'number'
                 ? remoteData.editTimestamp
                 : (remoteData.lastUpdatedAt ? new Date(remoteData.lastUpdatedAt).getTime() : 0);
-              const localTs = getStoredLocalEditTimestamp();
 
-              // If local state has newer edits than remote Firestore data (by more than 400ms),
-              // NEVER overwrite fresh local state with stale remote data!
-              // Instead, push the latest local state to Firestore so cloud catches up.
-              if (localTs > 0 && remoteTs > 0 && localTs > remoteTs + 400) {
-                if (!isFirestoreQuotaExceeded) {
-                  persistToFirestore(memoryState, true).catch(() => {});
-                }
-                return;
-              }
-
-              // Ensure cloud data is the source of truth for all devices
-              const finalPhotos = Array.isArray(remoteData.photos) && remoteData.photos.length > 0
-                ? remoteData.photos
-                : (memoryState.photos && memoryState.photos.length > 0 ? memoryState.photos : initialChurchData.photos);
-
-              const finalVideos = Array.isArray(remoteData.videos) && remoteData.videos.length > 0
-                ? remoteData.videos
-                : (memoryState.videos && memoryState.videos.length > 0 ? memoryState.videos : initialChurchData.videos);
-
-              const finalHighlights = Array.isArray(remoteData.highlights) && remoteData.highlights.length > 0
-                ? remoteData.highlights
-                : (memoryState.highlights && memoryState.highlights.length > 0 ? memoryState.highlights : initialChurchData.highlights);
-
-              const finalSchedule = Array.isArray(remoteData.worshipSchedule) && remoteData.worshipSchedule.length > 0
-                ? remoteData.worshipSchedule
-                : (memoryState.worshipSchedule && memoryState.worshipSchedule.length > 0 ? memoryState.worshipSchedule : initialChurchData.worshipSchedule);
-
-              // Preserve local heroVideo if user uploaded a custom file or prioritize remote cloud URL
-              const localHeroVideo = memoryState.currentActivity?.heroVideo;
-              const remoteHeroVideo = remoteData.currentActivity?.heroVideo;
-              const finalHeroVideo = remoteHeroVideo || localHeroVideo || initialChurchData.currentActivity.heroVideo;
+              // Ensure cloud data is the absolute, unified source of truth for all devices (Computers, Phones, Tablets)
+              const finalPhotos = Array.isArray(remoteData.photos) ? remoteData.photos : initialChurchData.photos;
+              const finalVideos = Array.isArray(remoteData.videos) ? remoteData.videos : initialChurchData.videos;
+              const finalHighlights = Array.isArray(remoteData.highlights) ? remoteData.highlights : initialChurchData.highlights;
+              const finalSchedule = Array.isArray(remoteData.worshipSchedule) ? remoteData.worshipSchedule : initialChurchData.worshipSchedule;
+              const finalEvents = Array.isArray(remoteData.upcomingEvents) ? remoteData.upcomingEvents : initialChurchData.upcomingEvents;
+              const finalSocialLinks = Array.isArray(remoteData.socialLinks) ? remoteData.socialLinks : initialChurchData.socialLinks;
+              const finalTestimonies = Array.isArray(remoteData.testimonies) ? remoteData.testimonies : initialChurchData.testimonies;
+              const finalHeroVideo = remoteData.currentActivity?.heroVideo || initialChurchData.currentActivity.heroVideo;
 
               const sanitized: ChurchSettings = {
                 ...initialChurchData,
                 ...remoteData,
-                churchName: remoteData.churchName || memoryState.churchName || initialChurchData.churchName,
-                churchMotto: remoteData.churchMotto || memoryState.churchMotto || initialChurchData.churchMotto,
-                churchAbout: remoteData.churchAbout || memoryState.churchAbout || initialChurchData.churchAbout,
-                phone: remoteData.phone || memoryState.phone || initialChurchData.phone,
-                whatsappNumber: remoteData.whatsappNumber || memoryState.whatsappNumber || initialChurchData.whatsappNumber,
-                whatsappMessage: remoteData.whatsappMessage || memoryState.whatsappMessage || initialChurchData.whatsappMessage,
-                email: remoteData.email || memoryState.email || initialChurchData.email,
-                address: remoteData.address || memoryState.address || initialChurchData.address,
-                cityCountry: remoteData.cityCountry || memoryState.cityCountry || initialChurchData.cityCountry,
+                churchName: remoteData.churchName || initialChurchData.churchName,
+                churchMotto: remoteData.churchMotto || initialChurchData.churchMotto,
+                churchAbout: remoteData.churchAbout || initialChurchData.churchAbout,
+                phone: remoteData.phone || initialChurchData.phone,
+                whatsappNumber: remoteData.whatsappNumber || initialChurchData.whatsappNumber,
+                whatsappMessage: remoteData.whatsappMessage || initialChurchData.whatsappMessage,
+                email: remoteData.email || initialChurchData.email,
+                address: remoteData.address || initialChurchData.address,
+                cityCountry: remoteData.cityCountry || initialChurchData.cityCountry,
                 currentActivity: {
                   ...initialChurchData.currentActivity,
-                  ...(memoryState.currentActivity || {}),
                   ...(remoteData.currentActivity || {}),
                   heroVideo: finalHeroVideo,
                 },
-                upcomingEvents: Array.isArray(remoteData.upcomingEvents) && remoteData.upcomingEvents.length > 0 
-                  ? remoteData.upcomingEvents 
-                  : (memoryState.upcomingEvents || initialChurchData.upcomingEvents),
+                upcomingEvents: finalEvents,
                 photos: finalPhotos,
                 videos: finalVideos,
-                socialLinks: Array.isArray(remoteData.socialLinks) && remoteData.socialLinks.length > 0 ? remoteData.socialLinks : (memoryState.socialLinks || initialChurchData.socialLinks),
+                socialLinks: finalSocialLinks,
                 highlights: finalHighlights,
-                testimonies: Array.isArray(remoteData.testimonies) && remoteData.testimonies.length > 0 ? remoteData.testimonies : (memoryState.testimonies || initialChurchData.testimonies),
+                testimonies: finalTestimonies,
                 worshipSchedule: finalSchedule,
                 developedBy: {
                   ...initialChurchData.developedBy,
@@ -392,7 +360,7 @@ export function ChurchProvider({ children }: { children: React.ReactNode }) {
                 },
               };
 
-              // Update memory state and notify listeners
+              // Update memory state and notify all UI listeners across the app
               memoryState = sanitized;
               if (remoteTs > 0) {
                 setStoredLocalEditTimestamp(remoteTs);
