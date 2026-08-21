@@ -284,11 +284,23 @@ export function ChurchProvider({ children }: { children: React.ReactNode }) {
     () => false
   );
 
+  const [isAppReady, setIsAppReady] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    return !!localStorage.getItem(LOCAL_STORAGE_KEY) || !!localStorage.getItem('catedral_amor_e_fe_data_v1');
+  });
   const [isAdminOpen, setIsAdminOpen] = useState(false);
-  const [syncState, setSyncState] = useState<SyncState>(checkIsQuotaExceededStored() ? 'quota_exceeded' : 'syncing');
-  const [isQuotaExceeded, setIsQuotaExceeded] = useState(checkIsQuotaExceededStored());
+  const [syncState, setSyncState] = useState<SyncState>('syncing');
+  const [isQuotaExceeded, setIsQuotaExceeded] = useState(false);
   const [lastSyncedAt, setLastSyncedAt] = useState<Date | null>(null);
   const isInitialRemoteLoadDone = useRef(false);
+
+  useEffect(() => {
+    // First time visitor fallback timeout (never stay stuck loading)
+    const timer = setTimeout(() => {
+      setIsAppReady(true);
+    }, 500);
+    return () => clearTimeout(timer);
+  }, []);
 
   useEffect(() => {
     onQuotaStateChange = (exceeded: boolean) => {
@@ -375,6 +387,7 @@ export function ChurchProvider({ children }: { children: React.ReactNode }) {
               listeners.forEach((l) => l());
               setLastSyncedAt(new Date());
               setSyncState('synced');
+              setIsAppReady(true);
             }
           } else {
             // First time project setup: seed current memory state to Firestore only if quota allows
@@ -386,10 +399,12 @@ export function ChurchProvider({ children }: { children: React.ReactNode }) {
                 }
               });
             }
+            setIsAppReady(true);
           }
           isInitialRemoteLoadDone.current = true;
         },
         (error) => {
+          setIsAppReady(true);
           const errObj = error as { message?: string; code?: string };
           const errString = errObj?.message || String(error);
           const isQuota = 
@@ -758,7 +773,7 @@ export function ChurchProvider({ children }: { children: React.ReactNode }) {
     <ChurchContext.Provider
       value={{
         data,
-        isReady,
+        isReady: isReady && isAppReady,
         updateCurrentActivity,
         updateChurchInfo,
         addPhoto,
