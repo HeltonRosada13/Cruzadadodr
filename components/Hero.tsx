@@ -38,6 +38,7 @@ export function Hero() {
   const [isPlaying, setIsPlaying] = useState(false);
   const [customBlobUrl, setCustomBlobUrl] = useState<string | null>(null);
   const [isVideoModalOpen, setIsVideoModalOpen] = useState(false);
+  const youtubeIframeRef = useRef<HTMLIFrameElement>(null);
 
   // Identify YouTube link from activity, custom URL or fallback videos
   const currentHeroVideoUrl = activity.heroVideo || '';
@@ -252,7 +253,20 @@ export function Hero() {
 
   const toggleSound = (e?: React.MouseEvent) => {
     e?.stopPropagation();
-    if (videoRef.current) {
+    if (isYouTube) {
+      const iframe = youtubeIframeRef.current;
+      if (iframe?.contentWindow) {
+        if (isMuted) {
+          iframe.contentWindow.postMessage(JSON.stringify({ event: 'command', func: 'unMute' }), '*');
+          iframe.contentWindow.postMessage(JSON.stringify({ event: 'command', func: 'setVolume', args: [100] }), '*');
+          iframe.contentWindow.postMessage(JSON.stringify({ event: 'command', func: 'playVideo' }), '*');
+          setIsMuted(false);
+        } else {
+          iframe.contentWindow.postMessage(JSON.stringify({ event: 'command', func: 'mute' }), '*');
+          setIsMuted(true);
+        }
+      }
+    } else if (videoRef.current) {
       const nextMuted = !isMuted;
       videoRef.current.muted = nextMuted;
       setIsMuted(nextMuted);
@@ -288,7 +302,8 @@ export function Hero() {
       <div className="absolute inset-0 z-0 overflow-hidden bg-black">
         {isYouTube ? (
           <iframe
-            src={formatYouTubeEmbedUrl(rawVideo, true) + '&mute=1&controls=0&loop=1&playsinline=1'}
+            ref={youtubeIframeRef}
+            src={formatYouTubeEmbedUrl(rawVideo, true) + '&mute=1&controls=0&loop=1&playsinline=1&enablejsapi=1'}
             title={activity.name}
             className="w-full h-full border-0 absolute inset-0 pointer-events-none scale-125"
             allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
@@ -317,22 +332,55 @@ export function Hero() {
         <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-black/40 z-10 pointer-events-none" />
       </div>
 
-      {/* Floating Audio/Play Controls - Visible on both Mobile & Desktop */}
-      {isYouTube ? (
-        <div className="absolute bottom-4 right-4 sm:bottom-6 sm:right-6 z-30 flex items-center gap-2 bg-black/85 backdrop-blur-md border border-white/20 px-3.5 py-1.5 rounded-full text-white text-[10px] font-semibold tracking-wider shadow-2xl">
-          <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse mr-0.5" />
-          <span className="uppercase text-neutral-200 text-[9px] sm:text-[10px]">YouTube Oficial</span>
-          <div className="w-[1px] h-3 bg-white/20 mx-1" />
-          
-          <button
-            onClick={() => setIsVideoModalOpen(true)}
-            className="px-2.5 py-1 bg-red-600 hover:bg-red-700 text-white rounded-full text-[9px] sm:text-[10px] font-bold uppercase tracking-wider flex items-center gap-1.5 transition-all cursor-pointer shadow-md"
-            title="Assistir Vídeo com Som"
-          >
-            <Play className="w-3 h-3 fill-current" />
-            <span>Assistir com Som</span>
-          </button>
+      {/* Floating Audio Controls - Dedicated button to listen to video audio */}
+      <div className="absolute bottom-4 right-4 sm:bottom-6 sm:right-6 z-30 flex items-center gap-2 bg-black/85 backdrop-blur-md border border-white/20 px-3 py-1.5 rounded-full text-white text-[10px] font-semibold tracking-wider shadow-2xl">
+        <span className={`w-2 h-2 rounded-full mr-0.5 ${!isMuted ? 'bg-emerald-500 animate-pulse' : 'bg-[#C5A059]'}`} />
+        <span className="uppercase text-neutral-300 text-[9px] sm:text-[10px] hidden xs:inline">
+          {isYouTube ? 'Áudio do Vídeo' : 'Vídeo Ao Vivo'}
+        </span>
+        <div className="w-[1px] h-3 bg-white/20 mx-0.5 hidden xs:block" />
+        
+        {/* Main Audio Button requested by user */}
+        <button
+          onClick={toggleSound}
+          aria-label={isMuted ? 'Ouvir áudio do vídeo' : 'Silenciar áudio do vídeo'}
+          className={`px-3 py-1.5 rounded-full transition-all cursor-pointer flex items-center gap-1.5 font-bold text-[9px] sm:text-[10px] shadow-md ${
+            !isMuted 
+              ? 'bg-[#C5A059] hover:bg-[#B58E45] text-white ring-2 ring-[#C5A059]/50' 
+              : 'bg-white/20 hover:bg-white/30 text-white border border-white/25 hover:border-white/40'
+          }`}
+          title={isMuted ? 'Clique para ouvir o áudio do vídeo' : 'Áudio ativo - Clique para silenciar'}
+        >
+          {isMuted ? (
+            <>
+              <VolumeX className="w-3.5 h-3.5 text-neutral-200" />
+              <span className="uppercase tracking-wider">Ouvir Áudio do Vídeo</span>
+            </>
+          ) : (
+            <>
+              <Volume2 className="w-3.5 h-3.5 animate-pulse text-white" />
+              <span className="uppercase tracking-wider font-extrabold text-white">Ouvindo Áudio</span>
+              <span className="flex items-end gap-0.5 h-2.5 ml-0.5">
+                <span className="w-0.5 h-2 bg-white rounded-full animate-pulse" />
+                <span className="w-0.5 h-3 bg-white rounded-full animate-pulse delay-75" />
+                <span className="w-0.5 h-1.5 bg-white rounded-full animate-pulse delay-150" />
+              </span>
+            </>
+          )}
+        </button>
 
+        {!isYouTube && (
+          <button
+            onClick={togglePlay}
+            aria-label={isPlaying ? 'Pausar vídeo' : 'Reproduzir vídeo'}
+            className="p-1 text-neutral-300 hover:text-white transition-colors cursor-pointer"
+            title={isPlaying ? 'Pausar Vídeo' : 'Reproduzir Vídeo'}
+          >
+            {isPlaying ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
+          </button>
+        )}
+
+        {isYouTube && (
           <a
             href={getYouTubeWatchUrl(rawVideo)}
             target="_blank"
@@ -342,46 +390,8 @@ export function Hero() {
           >
             <ExternalLink className="w-3.5 h-3.5" />
           </a>
-        </div>
-      ) : (
-        <div className="absolute bottom-4 right-4 sm:bottom-6 sm:right-6 z-30 flex items-center gap-2 bg-black/80 backdrop-blur-md border border-white/20 px-3 py-1.5 rounded-full text-white text-[10px] font-semibold tracking-wider shadow-xl">
-          <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse mr-0.5" />
-          <span className="uppercase text-neutral-200 text-[9px] sm:text-[10px]">Vídeo Ao Vivo</span>
-          <div className="w-[1px] h-3 bg-white/20 mx-1" />
-          
-          <button
-            onClick={togglePlay}
-            aria-label={isPlaying ? 'Pausar vídeo de fundo' : 'Reproduzir vídeo de fundo'}
-            className="p-1 hover:text-[#C5A059] transition-colors cursor-pointer"
-            title={isPlaying ? 'Pausar Vídeo' : 'Reproduzir Vídeo'}
-          >
-            {isPlaying ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
-          </button>
-
-          <button
-            onClick={toggleSound}
-            aria-label={isMuted ? 'Ativar som' : 'Silenciar som'}
-            className={`px-2.5 py-1 rounded-full transition-all cursor-pointer flex items-center gap-1.5 font-bold text-[9px] sm:text-[10px] ${
-              !isMuted 
-                ? 'bg-[#C5A059] text-white shadow-md ring-2 ring-[#C5A059]/40' 
-                : 'bg-white/15 text-neutral-200 hover:text-white hover:bg-white/25 border border-white/20'
-            }`}
-            title={isMuted ? 'Ativar Som' : 'Som Ativo (Clique para silenciar)'}
-          >
-            {isMuted ? (
-              <>
-                <VolumeX className="w-3.5 h-3.5" />
-                <span className="uppercase tracking-wider">Ativar Som</span>
-              </>
-            ) : (
-              <>
-                <Volume2 className="w-3.5 h-3.5 animate-pulse text-white" />
-                <span className="uppercase tracking-wider font-extrabold text-white">Som Ativo</span>
-              </>
-            )}
-          </button>
-        </div>
-      )}
+        )}
+      </div>
 
       {/* Content */}
       <div className="relative z-20 max-w-5xl mx-auto text-center flex flex-col items-center">
