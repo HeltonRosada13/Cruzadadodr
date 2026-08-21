@@ -46,8 +46,8 @@ interface ChurchContextType {
   firebaseConsoleUrl: string;
 }
 
-const LOCAL_STORAGE_KEY = 'catedral_amor_e_fe_data_v2';
-const LAST_EDIT_TS_KEY = 'catedral_last_edit_timestamp_v2';
+const LOCAL_STORAGE_KEY = 'catedral_amor_e_fe_data_v4';
+const LAST_EDIT_TS_KEY = 'catedral_last_edit_timestamp_v4';
 const QUOTA_STORAGE_KEY = 'catedral_firestore_quota_exceeded_timestamp';
 const FIRESTORE_DOC_PATH = 'church_data';
 const FIRESTORE_DOC_ID = 'main';
@@ -153,11 +153,16 @@ function initChurchDataFromStorage() {
   hasInitializedFromStorage = true;
   isFirestoreQuotaExceeded = checkIsQuotaExceededStored();
   try {
-    const savedV2 = localStorage.getItem('catedral_amor_e_fe_data_v2');
-    const savedV1 = localStorage.getItem('catedral_amor_e_fe_data_v1');
-    const saved = savedV2 || savedV1;
+    // Purge outdated caches from prior revisions so old mock data never leaks
+    localStorage.removeItem('catedral_amor_e_fe_data_v1');
+    localStorage.removeItem('catedral_amor_e_fe_data_v2');
+    localStorage.removeItem('catedral_amor_e_fe_data_v3');
+
+    const saved = localStorage.getItem(LOCAL_STORAGE_KEY);
     if (saved) {
       memoryState = sanitizeSavedData(saved);
+    } else {
+      memoryState = initialChurchData;
       localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(memoryState));
     }
   } catch (e) {
@@ -284,23 +289,11 @@ export function ChurchProvider({ children }: { children: React.ReactNode }) {
     () => false
   );
 
-  const [isAppReady, setIsAppReady] = useState(() => {
-    if (typeof window === 'undefined') return false;
-    return !!localStorage.getItem(LOCAL_STORAGE_KEY) || !!localStorage.getItem('catedral_amor_e_fe_data_v1');
-  });
   const [isAdminOpen, setIsAdminOpen] = useState(false);
   const [syncState, setSyncState] = useState<SyncState>('syncing');
   const [isQuotaExceeded, setIsQuotaExceeded] = useState(false);
   const [lastSyncedAt, setLastSyncedAt] = useState<Date | null>(null);
   const isInitialRemoteLoadDone = useRef(false);
-
-  useEffect(() => {
-    // First time visitor fallback timeout (never stay stuck loading)
-    const timer = setTimeout(() => {
-      setIsAppReady(true);
-    }, 500);
-    return () => clearTimeout(timer);
-  }, []);
 
   useEffect(() => {
     onQuotaStateChange = (exceeded: boolean) => {
@@ -387,7 +380,6 @@ export function ChurchProvider({ children }: { children: React.ReactNode }) {
               listeners.forEach((l) => l());
               setLastSyncedAt(new Date());
               setSyncState('synced');
-              setIsAppReady(true);
             }
           } else {
             // First time project setup: seed current memory state to Firestore only if quota allows
@@ -399,12 +391,10 @@ export function ChurchProvider({ children }: { children: React.ReactNode }) {
                 }
               });
             }
-            setIsAppReady(true);
           }
           isInitialRemoteLoadDone.current = true;
         },
         (error) => {
-          setIsAppReady(true);
           const errObj = error as { message?: string; code?: string };
           const errString = errObj?.message || String(error);
           const isQuota = 
@@ -773,7 +763,7 @@ export function ChurchProvider({ children }: { children: React.ReactNode }) {
     <ChurchContext.Provider
       value={{
         data,
-        isReady: isReady && isAppReady,
+        isReady,
         updateCurrentActivity,
         updateChurchInfo,
         addPhoto,
