@@ -6,6 +6,7 @@ import { PhotoItem, ChurchEvent } from '@/lib/types';
 import { saveHeroVideoBlob, clearHeroVideoBlob, saveVideoFileBlob, generateVideoThumbnailAndDuration } from '@/lib/videoStorage';
 import { processAndOptimizeImage } from '@/lib/imageUtils';
 import { AdminHighlightsTab } from '@/components/AdminHighlightsTab';
+import { isYouTubeVideoUrl, formatYouTubeEmbedUrl } from '@/lib/utils';
 import Image from 'next/image';
 import { 
   Settings, 
@@ -102,6 +103,7 @@ function AdminManagerModalInner() {
   const [uploadedGalleryVideoMeta, setUploadedGalleryVideoMeta] = useState<{ name: string; size: string } | null>(null);
   const [setAsFeaturedImmediately, setSetAsFeaturedImmediately] = useState(true);
   const [replaceOldVideosOnUpload, setReplaceOldVideosOnUpload] = useState(false);
+  const [setAsHeroVideoOnUpload, setSetAsHeroVideoOnUpload] = useState(true);
 
   // Photo / Image Upload States & File Input Refs
   const photoFileInputRef = useRef<HTMLInputElement>(null);
@@ -579,6 +581,15 @@ function AdminManagerModalInner() {
       thumbnailUrl: thumbUrl,
     });
 
+    if (setAsHeroVideoOnUpload) {
+      clearHeroVideoBlob().catch(() => {});
+      updateCurrentActivity({ heroVideo: embedUrl });
+      syncNowWithCloud();
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('hero-video-updated', { detail: { blobUrl: embedUrl } }));
+      }
+    }
+
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent('gallery-video-updated', { detail: { id: finalVideoId, blobUrl: embedUrl } }));
     }
@@ -594,7 +605,11 @@ function AdminManagerModalInner() {
       date: 'Atividade Oficial',
     });
     setUploadedGalleryVideoMeta(null);
-    showNotification('Vídeo publicado com sucesso no site e salvo permanentemente!');
+    showNotification(
+      setAsHeroVideoOnUpload
+        ? 'Vídeo publicado na Galeria e definido como Vídeo do Hero no Cabeçalho!'
+        : 'Vídeo publicado com sucesso na Galeria do site!'
+    );
   };
 
   const handleAddEventSubmit = (e: React.FormEvent) => {
@@ -976,30 +991,40 @@ function AdminManagerModalInner() {
                     <div className="p-3 bg-white rounded-sm border border-neutral-200 flex flex-col sm:flex-row items-center justify-between gap-3">
                       <div className="flex items-center gap-3 w-full sm:w-auto">
                         <div className="w-24 h-14 bg-black rounded-sm overflow-hidden flex-shrink-0 relative border border-neutral-300">
-                          <video
-                            src={activityForm.heroVideo}
-                            autoPlay
-                            loop
-                            muted
-                            playsInline
-                            className="w-full h-full object-cover"
-                          />
+                          {isYouTubeVideoUrl(activityForm.heroVideo) ? (
+                            <iframe
+                              src={formatYouTubeEmbedUrl(activityForm.heroVideo, false)}
+                              className="w-full h-full border-0 pointer-events-none scale-110"
+                              title="Preview do Vídeo YouTube"
+                            />
+                          ) : (
+                            <video
+                              src={activityForm.heroVideo}
+                              autoPlay
+                              loop
+                              muted
+                              playsInline
+                              className="w-full h-full object-cover"
+                            />
+                          )}
                           <div className="absolute top-1 right-1 bg-emerald-500 w-2 h-2 rounded-full animate-ping" />
                         </div>
                         <div className="overflow-hidden">
                           <div className="flex items-center gap-1.5 text-xs font-bold text-neutral-900">
                             <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 flex-shrink-0" />
                             <span className="truncate">
-                              {uploadedVideoName || 'Vídeo Ativo em Reprodução no Hero'}
+                              {isYouTubeVideoUrl(activityForm.heroVideo)
+                                ? 'Vídeo do YouTube Ativo no Hero'
+                                : (uploadedVideoName || 'Vídeo Ativo em Reprodução no Hero')}
                             </span>
                           </div>
-                          {uploadedVideoSize && (
+                          {uploadedVideoSize && !isYouTubeVideoUrl(activityForm.heroVideo) && (
                             <span className="text-[10px] text-neutral-500 block">
                               Tamanho: {uploadedVideoSize} • Armazenado e sincronizado localmente
                             </span>
                           )}
                           <span className="text-[10px] text-emerald-700 font-medium block">
-                            ● Já a funcionar na página principal
+                            ● Já a funcionar na página principal e sincronizado em todos os aparelhos
                           </span>
                         </div>
                       </div>
@@ -1076,9 +1101,26 @@ function AdminManagerModalInner() {
                             updateCurrentActivity({ heroVideo: url });
                           }
                         }}
-                        placeholder="Ou cole a URL direta de um vídeo (.mp4, .webm ou YouTube https://youtu.be/...)"
+                        placeholder="Cole a URL do YouTube (ex: https://youtu.be/... ou https://youtube.com/watch?v=...) ou .mp4"
                         className="flex-1 px-3 py-2 rounded-sm bg-white border border-neutral-300 text-xs text-neutral-900 focus:outline-none focus:border-black"
                       />
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          if (activityForm.heroVideo) {
+                            await clearHeroVideoBlob();
+                            updateCurrentActivity({ heroVideo: activityForm.heroVideo });
+                            syncNowWithCloud();
+                            if (typeof window !== 'undefined') {
+                              window.dispatchEvent(new CustomEvent('hero-video-updated', { detail: { blobUrl: activityForm.heroVideo } }));
+                            }
+                            showNotification('Vídeo do Hero atualizado e sincronizado com sucesso!');
+                          }
+                        }}
+                        className="px-3.5 py-2 bg-[#1A1A1A] hover:bg-[#C5A059] text-white text-xs font-bold uppercase tracking-wider rounded-sm transition-colors cursor-pointer"
+                      >
+                        Aplicar
+                      </button>
                     </div>
                   </div>
                 </div>
@@ -1734,7 +1776,17 @@ function AdminManagerModalInner() {
                     />
                   </div>
 
-                  <div className="md:col-span-2 pt-1 border-t border-neutral-200">
+                  <div className="md:col-span-2 pt-2 space-y-2 border-t border-neutral-200">
+                    <label className="flex items-center gap-2 cursor-pointer select-none text-xs font-semibold text-neutral-800">
+                      <input
+                        type="checkbox"
+                        checked={setAsHeroVideoOnUpload}
+                        onChange={(e) => setSetAsHeroVideoOnUpload(e.target.checked)}
+                        className="rounded text-[#C5A059] focus:ring-0 cursor-pointer"
+                      />
+                      <span>Exibir também no Hero (Vídeo Principal do Cabeçalho da Página)</span>
+                    </label>
+
                     <label className="flex items-center gap-2 cursor-pointer select-none text-xs text-neutral-700">
                       <input
                         type="checkbox"
@@ -1841,23 +1893,42 @@ function AdminManagerModalInner() {
                             </div>
                           </div>
 
-                          <div className="flex items-center justify-between pt-2 border-t border-neutral-200/60 text-xs">
-                            {!isFeatured ? (
+                          <div className="flex items-center justify-between pt-2 border-t border-neutral-200/60 text-xs gap-2 flex-wrap">
+                            <div className="flex items-center gap-2">
+                              {!isFeatured ? (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setPrimaryFeaturedVideo(vid.id);
+                                    showNotification(`"${vid.title}" definido como vídeo de destaque principal!`);
+                                  }}
+                                  className="text-[10px] text-[#C5A059] hover:underline font-bold uppercase tracking-wider flex items-center gap-1 cursor-pointer"
+                                >
+                                  ★ Destaque
+                                </button>
+                              ) : (
+                                <span className="text-[10px] text-amber-700 font-bold uppercase tracking-wider">
+                                  ★ Topo
+                                </span>
+                              )}
+
                               <button
                                 type="button"
-                                onClick={() => {
-                                  setPrimaryFeaturedVideo(vid.id);
-                                  showNotification(`"${vid.title}" definido como vídeo de destaque principal!`);
+                                onClick={async () => {
+                                  await clearHeroVideoBlob();
+                                  updateCurrentActivity({ heroVideo: vid.videoUrl });
+                                  syncNowWithCloud();
+                                  if (typeof window !== 'undefined') {
+                                    window.dispatchEvent(new CustomEvent('hero-video-updated', { detail: { blobUrl: vid.videoUrl } }));
+                                  }
+                                  showNotification(`"${vid.title}" definido como Vídeo do Hero no Cabeçalho!`);
                                 }}
-                                className="text-[10px] text-[#C5A059] hover:underline font-bold uppercase tracking-wider flex items-center gap-1 cursor-pointer"
+                                className="text-[10px] text-emerald-700 hover:text-emerald-900 bg-emerald-50 hover:bg-emerald-100 px-2 py-0.5 rounded border border-emerald-300 font-bold uppercase tracking-wider flex items-center gap-1 cursor-pointer"
+                                title="Definir este vídeo como fundo principal do Hero"
                               >
-                                ★ Definir Destaque
+                                🎬 Usar no Hero
                               </button>
-                            ) : (
-                              <span className="text-[10px] text-amber-700 font-bold uppercase tracking-wider">
-                                Ativo no Topo
-                              </span>
-                            )}
+                            </div>
 
                             <button
                               type="button"

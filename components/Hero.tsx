@@ -4,7 +4,7 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useChurch } from '@/lib/ChurchContext';
 import { getHeroVideoBlobUrl } from '@/lib/videoStorage';
 import { CountdownTimer } from './CountdownTimer';
-import { isYouTubeVideoUrl, formatYouTubeEmbedUrl } from '@/lib/utils';
+import { isYouTubeVideoUrl, formatYouTubeEmbedUrl, getYouTubeWatchUrl } from '@/lib/utils';
 import { 
   ArrowDown, 
   Images, 
@@ -16,7 +16,10 @@ import {
   VolumeX,
   Play,
   Pause,
-  Sparkles
+  Sparkles,
+  ExternalLink,
+  X,
+  Film
 } from 'lucide-react';
 import Image from 'next/image';
 
@@ -34,20 +37,46 @@ export function Hero() {
   const [isMuted, setIsMuted] = useState(true);
   const [isPlaying, setIsPlaying] = useState(false);
   const [customBlobUrl, setCustomBlobUrl] = useState<string | null>(null);
+  const [isVideoModalOpen, setIsVideoModalOpen] = useState(false);
+
+  // Identify YouTube link from activity, custom URL or fallback videos
+  const currentHeroVideoUrl = activity.heroVideo || '';
+  const isYouTube = isYouTubeVideoUrl(currentHeroVideoUrl) || isYouTubeVideoUrl(customBlobUrl);
+  const rawVideo = isYouTube
+    ? (isYouTubeVideoUrl(currentHeroVideoUrl) ? currentHeroVideoUrl : (customBlobUrl || currentHeroVideoUrl))
+    : (customBlobUrl || currentHeroVideoUrl || DEFAULT_FALLBACK_VIDEO);
+  const videoSrc = (!isYouTube ? rawVideo : null) || DEFAULT_FALLBACK_VIDEO;
+
+  // Always resolve the best YouTube link for the church
+  const resolvedYouTubeUrl = isYouTubeVideoUrl(rawVideo)
+    ? rawVideo
+    : (isYouTubeVideoUrl(activity.heroVideo)
+        ? activity.heroVideo
+        : (isYouTubeVideoUrl(activity.videoPromoUrl)
+            ? activity.videoPromoUrl
+            : (data.videos?.find((v) => isYouTubeVideoUrl(v.videoUrl))?.videoUrl || 'https://www.youtube.com/watch?v=ScMzIvxBSi4')));
 
   // Hydrate local video blob on mount or when uploaded
   useEffect(() => {
     let isMounted = true;
-    getHeroVideoBlobUrl().then((blobUrl) => {
-      if (isMounted && blobUrl) {
-        setCustomBlobUrl(blobUrl);
-      }
-    });
+    
+    // Only search for local IndexedDB blob if heroVideo is NOT configured as a YouTube link
+    if (!isYouTubeVideoUrl(activity.heroVideo)) {
+      getHeroVideoBlobUrl().then((blobUrl) => {
+        if (isMounted && blobUrl) {
+          setCustomBlobUrl(blobUrl);
+        }
+      });
+    }
 
     const handleVideoUpdated = (e: Event) => {
       const customEvent = e as CustomEvent<{ blobUrl: string | null }>;
       if (customEvent.detail !== undefined) {
-        setCustomBlobUrl(customEvent.detail.blobUrl);
+        if (customEvent.detail.blobUrl && isYouTubeVideoUrl(customEvent.detail.blobUrl)) {
+          setCustomBlobUrl(null);
+        } else {
+          setCustomBlobUrl(customEvent.detail.blobUrl);
+        }
       }
     };
 
@@ -57,7 +86,7 @@ export function Hero() {
       isMounted = false;
       window.removeEventListener('hero-video-updated', handleVideoUpdated);
     };
-  }, []);
+  }, [activity.heroVideo]);
 
   const safePlay = useCallback(() => {
     const video = videoRef.current;
@@ -114,10 +143,6 @@ export function Hero() {
       setIsPlaying(false);
     }
   }, []);
-
-  const rawVideo = customBlobUrl || activity.heroVideo;
-  const isYouTube = isYouTubeVideoUrl(rawVideo);
-  const videoSrc = (rawVideo && !isYouTube ? rawVideo : null) || DEFAULT_FALLBACK_VIDEO;
 
   // Imperative video element setup for mobile iOS & Android & Desktop
   useEffect(() => {
@@ -263,7 +288,7 @@ export function Hero() {
       <div className="absolute inset-0 z-0 overflow-hidden bg-black">
         {isYouTube ? (
           <iframe
-            src={formatYouTubeEmbedUrl(activity.heroVideo, true) + '&mute=1&controls=0&loop=1&playsinline=1'}
+            src={formatYouTubeEmbedUrl(rawVideo, true) + '&mute=1&controls=0&loop=1&playsinline=1'}
             title={activity.name}
             className="w-full h-full border-0 absolute inset-0 pointer-events-none scale-125"
             allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
@@ -293,7 +318,32 @@ export function Hero() {
       </div>
 
       {/* Floating Audio/Play Controls - Visible on both Mobile & Desktop */}
-      {!isYouTube && (
+      {isYouTube ? (
+        <div className="absolute bottom-4 right-4 sm:bottom-6 sm:right-6 z-30 flex items-center gap-2 bg-black/85 backdrop-blur-md border border-white/20 px-3.5 py-1.5 rounded-full text-white text-[10px] font-semibold tracking-wider shadow-2xl">
+          <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse mr-0.5" />
+          <span className="uppercase text-neutral-200 text-[9px] sm:text-[10px]">YouTube Oficial</span>
+          <div className="w-[1px] h-3 bg-white/20 mx-1" />
+          
+          <button
+            onClick={() => setIsVideoModalOpen(true)}
+            className="px-2.5 py-1 bg-red-600 hover:bg-red-700 text-white rounded-full text-[9px] sm:text-[10px] font-bold uppercase tracking-wider flex items-center gap-1.5 transition-all cursor-pointer shadow-md"
+            title="Assistir Vídeo com Som"
+          >
+            <Play className="w-3 h-3 fill-current" />
+            <span>Assistir com Som</span>
+          </button>
+
+          <a
+            href={getYouTubeWatchUrl(rawVideo)}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="p-1 hover:text-[#C5A059] text-neutral-300 transition-colors"
+            title="Abrir no YouTube"
+          >
+            <ExternalLink className="w-3.5 h-3.5" />
+          </a>
+        </div>
+      ) : (
         <div className="absolute bottom-4 right-4 sm:bottom-6 sm:right-6 z-30 flex items-center gap-2 bg-black/80 backdrop-blur-md border border-white/20 px-3 py-1.5 rounded-full text-white text-[10px] font-semibold tracking-wider shadow-xl">
           <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse mr-0.5" />
           <span className="uppercase text-neutral-200 text-[9px] sm:text-[10px]">Vídeo Ao Vivo</span>
@@ -374,7 +424,7 @@ export function Hero() {
           </div>
         </div>
 
-        {/* Visitor Action Buttons: SABER MAIS & VER FOTOS E VÍDEOS */}
+        {/* Visitor Action Buttons: SABER MAIS, ASSISTIR NO YOUTUBE & GALERIA */}
         <div className="flex flex-col sm:flex-row items-center justify-center gap-4 w-full sm:w-auto mb-10">
           <button
             id="hero-btn-saber-mais"
@@ -386,12 +436,21 @@ export function Hero() {
           </button>
 
           <button
+            id="hero-btn-assistir-youtube"
+            onClick={() => setIsVideoModalOpen(true)}
+            className="w-full sm:w-auto flex items-center justify-center gap-2 px-8 py-3.5 text-[11px] font-bold uppercase tracking-widest text-white bg-red-600 hover:bg-red-700 rounded-sm shadow-xl transition-all transform hover:-translate-y-0.5 cursor-pointer ring-2 ring-red-500/30"
+          >
+            <Play className="w-3.5 h-3.5 fill-current" />
+            <span>Assistir no YouTube</span>
+          </button>
+
+          <button
             id="hero-btn-ver-fotos-videos"
             onClick={() => scrollToSection('#fotos')}
-            className="w-full sm:w-auto flex items-center justify-center gap-2 px-8 py-3.5 text-[11px] font-bold uppercase tracking-widest text-white border border-white/35 hover:border-white hover:bg-white/10 rounded-sm backdrop-blur-sm transition-all transform hover:-translate-y-0.5 cursor-pointer"
+            className="w-full sm:w-auto flex items-center justify-center gap-2 px-6 py-3.5 text-[11px] font-bold uppercase tracking-widest text-white border border-white/35 hover:border-white hover:bg-white/10 rounded-sm backdrop-blur-sm transition-all transform hover:-translate-y-0.5 cursor-pointer"
           >
             <Images className="w-3.5 h-3.5 text-[#C5A059]" />
-            <span>Ver Fotos e Vídeos</span>
+            <span>Galeria</span>
           </button>
         </div>
 
@@ -413,6 +472,57 @@ export function Hero() {
           <ChevronDown className="w-3.5 h-3.5 animate-bounce text-[#C5A059]" />
         </button>
       </div>
+
+      {/* Interactive YouTube Video Modal Player with sound */}
+      {isVideoModalOpen && (
+        <div 
+          id="hero-youtube-modal"
+          className="fixed inset-0 z-50 bg-black/90 backdrop-blur-md flex items-center justify-center p-4 sm:p-6 animate-in fade-in duration-200"
+          onClick={() => setIsVideoModalOpen(false)}
+        >
+          <div 
+            className="relative w-full max-w-4xl bg-black rounded-lg overflow-hidden border border-white/20 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between px-4 py-3 bg-neutral-900 border-b border-neutral-800">
+              <div className="flex items-center gap-2">
+                <span className="w-2.5 h-2.5 rounded-full bg-red-600 animate-pulse" />
+                <span className="text-xs font-bold uppercase tracking-wider text-white truncate max-w-xs sm:max-w-md">
+                  {activity.name} — Vídeo Oficial YouTube
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <a
+                  href={getYouTubeWatchUrl(resolvedYouTubeUrl)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-1.5 text-[11px] font-bold text-[#C5A059] hover:underline uppercase tracking-wider px-2.5 py-1 bg-white/5 hover:bg-white/10 rounded-sm transition-colors"
+                >
+                  <span>Abrir no YouTube</span>
+                  <ExternalLink className="w-3 h-3" />
+                </a>
+                <button
+                  onClick={() => setIsVideoModalOpen(false)}
+                  className="p-1.5 text-neutral-400 hover:text-white rounded-full hover:bg-white/10 transition-colors cursor-pointer"
+                  title="Fechar vídeo"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+            
+            <div className="relative aspect-video w-full bg-black">
+              <iframe
+                src={formatYouTubeEmbedUrl(resolvedYouTubeUrl, true) + '&autoplay=1&enablejsapi=1'}
+                title={activity.name}
+                className="w-full h-full border-0"
+                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                allowFullScreen
+              />
+            </div>
+          </div>
+        </div>
+      )}
     </section>
   );
 }

@@ -33,8 +33,8 @@ export const initialChurchData: ChurchSettings = {
     importantNotes:
       'Entrada totalmente livre e gratuita. Espaço Kids especial disponível para crianças de 2 a 11 anos. Transmissão simultânea em alta definição pelos canais oficiais.',
     heroImage: 'https://images.unsplash.com/photo-1519834785169-98be25ec3f84?auto=format&fit=crop&w=1920&q=85',
-    heroVideo: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4',
-    videoPromoUrl: 'https://www.youtube.com/embed/dQw4w9WgXcQ',
+    heroVideo: 'https://www.youtube.com/watch?v=ScMzIvxBSi4',
+    videoPromoUrl: 'https://www.youtube.com/watch?v=ScMzIvxBSi4',
     badge: 'Evento Especial do Ano',
     status: 'upcoming',
   },

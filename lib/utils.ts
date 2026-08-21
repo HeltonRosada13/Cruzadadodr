@@ -22,3 +22,12 @@ export function formatYouTubeEmbedUrl(url: string | undefined | null, autoPlay =
   }
   return url;
 }
+
+export function getYouTubeWatchUrl(url: string | undefined | null): string {
+  if (!url) return '';
+  const ytMatch = url.match(/(?:youtu\.be\/|youtube\.com\/(?:embed\/|v\/|watch\?v=|watch\?.+&v=)|youtube-nocookie\.com\/embed\/)([\w-]{11})/);
+  if (ytMatch && ytMatch[1]) {
+    return `https://www.youtube.com/watch?v=${ytMatch[1]}`;
+  }
+  return url;
+}
