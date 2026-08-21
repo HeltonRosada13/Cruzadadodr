@@ -3,7 +3,7 @@
 import React, { createContext, useContext, useSyncExternalStore, useState, useEffect, useRef, useCallback } from 'react';
 import { ChurchSettings, ChurchActivity, PhotoItem, VideoItem, ChurchEvent, SocialLink, HighlightMoment, Testimony } from './types';
 import { initialChurchData } from './churchData';
-import { db, doc, setDoc, onSnapshot, handleFirestoreError, OperationType } from './firebase';
+import { db, doc, setDoc, getDoc, onSnapshot, handleFirestoreError, OperationType } from './firebase';
 import { deleteVideoFileBlob, clearAllStoredVideoBlobs, clearHeroVideoBlob } from './videoStorage';
 
 export type SyncState = 'synced' | 'syncing' | 'offline' | 'quota_exceeded' | 'ready';
@@ -46,8 +46,8 @@ interface ChurchContextType {
   firebaseConsoleUrl: string;
 }
 
-const LOCAL_STORAGE_KEY = 'catedral_amor_e_fe_data_v4';
-const LAST_EDIT_TS_KEY = 'catedral_last_edit_timestamp_v4';
+const LOCAL_STORAGE_KEY = 'catedral_amor_e_fe_data_v2';
+const LAST_EDIT_TS_KEY = 'catedral_last_edit_timestamp_v2';
 const QUOTA_STORAGE_KEY = 'catedral_firestore_quota_exceeded_timestamp';
 const FIRESTORE_DOC_PATH = 'church_data';
 const FIRESTORE_DOC_ID = 'main';
@@ -58,7 +58,7 @@ const FIREBASE_CONSOLE_URL = `https://console.firebase.google.com/project/${FIRE
 function getStoredLocalEditTimestamp(): number {
   if (typeof window === 'undefined') return 0;
   try {
-    const raw = localStorage.getItem(LAST_EDIT_TS_KEY);
+    const raw = localStorage.getItem(LAST_EDIT_TS_KEY) || localStorage.getItem('catedral_last_edit_timestamp_v4');
     return raw ? parseInt(raw, 10) : 0;
   } catch {
     return 0;
@@ -94,6 +94,26 @@ let saveDebounceTimer: NodeJS.Timeout | null = null;
 let lastPersistedPayloadJson = '';
 let isFirestoreQuotaExceeded = false;
 let onQuotaStateChange: ((exceeded: boolean) => void) | null = null;
+
+// Multi-tab instant communication channel for sub-millisecond local synchronization
+const broadcastChannel = typeof window !== 'undefined' && 'BroadcastChannel' in window
+  ? new BroadcastChannel('catedral_sync_channel_v1')
+  : null;
+
+if (broadcastChannel) {
+  broadcastChannel.onmessage = (event) => {
+    if (event.data?.type === 'SYNC_STATE_UPDATE' && event.data?.payload) {
+      try {
+        const sanitized = sanitizeSavedData(JSON.stringify(event.data.payload));
+        memoryState = sanitized;
+        lastPersistedPayloadJson = JSON.stringify(sanitized);
+        listeners.forEach((l) => l());
+      } catch (err) {
+        console.warn('Error processing broadcast channel message:', err);
+      }
+    }
+  };
+}
 
 function sanitizeSavedData(savedRaw: string): ChurchSettings {
   try {
@@ -153,18 +173,36 @@ function initChurchDataFromStorage() {
   hasInitializedFromStorage = true;
   isFirestoreQuotaExceeded = checkIsQuotaExceededStored();
   try {
-    // Purge outdated caches from prior revisions so old mock data never leaks
-    localStorage.removeItem('catedral_amor_e_fe_data_v1');
-    localStorage.removeItem('catedral_amor_e_fe_data_v2');
-    localStorage.removeItem('catedral_amor_e_fe_data_v3');
+    // Check all known keys to restore customized user content safely
+    const v2 = localStorage.getItem('catedral_amor_e_fe_data_v2');
+    const v4 = localStorage.getItem('catedral_amor_e_fe_data_v4');
+    const v3 = localStorage.getItem('catedral_amor_e_fe_data_v3');
+    const v1 = localStorage.getItem('catedral_amor_e_fe_data_v1');
+    const legacy = localStorage.getItem('church_data') || localStorage.getItem('catedral_data');
 
-    const saved = localStorage.getItem(LOCAL_STORAGE_KEY);
+    let saved = v2 || v4 || v3 || v1 || legacy;
+
+    // If still not found, search all localStorage keys for any saved church configuration
+    if (!saved) {
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key && (key.startsWith('catedral') || key.includes('church'))) {
+          const val = localStorage.getItem(key);
+          if (val && val.includes('currentActivity')) {
+            saved = val;
+            break;
+          }
+        }
+      }
+    }
+
     if (saved) {
       memoryState = sanitizeSavedData(saved);
     } else {
       memoryState = initialChurchData;
-      localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(memoryState));
     }
+    // Save to active local key
+    localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(memoryState));
   } catch (e) {
     console.warn('Could not read saved church data from localStorage:', e);
   }
@@ -193,11 +231,6 @@ function subscribeChurchStore(listener: () => void) {
 async function persistToFirestore(state: ChurchSettings, force = false): Promise<boolean> {
   if (typeof window === 'undefined') return false;
 
-  // Prevent spamming requests if quota is known to be exceeded and not forcing
-  if (isFirestoreQuotaExceeded && !force) {
-    return false;
-  }
-
   // Deduplication: Avoid writing if data is identical to last persisted payload
   const currentPayloadJson = JSON.stringify(state);
   if (currentPayloadJson === lastPersistedPayloadJson && !force) {
@@ -215,11 +248,9 @@ async function persistToFirestore(state: ChurchSettings, force = false): Promise
     }, { merge: true });
     
     lastPersistedPayloadJson = currentPayloadJson;
-    if (isFirestoreQuotaExceeded) {
-      isFirestoreQuotaExceeded = false;
-      setQuotaExceededStored(false);
-      if (onQuotaStateChange) onQuotaStateChange(false);
-    }
+    isFirestoreQuotaExceeded = false;
+    setQuotaExceededStored(false);
+    if (onQuotaStateChange) onQuotaStateChange(false);
     return true;
   } catch (err: unknown) {
     const errObj = err as { message?: string; code?: string };
@@ -245,31 +276,32 @@ async function persistToFirestore(state: ChurchSettings, force = false): Promise
   }
 }
 
-function updateChurchStore(updater: (prev: ChurchSettings) => ChurchSettings) {
+function updateChurchStore(updater: (prev: ChurchSettings) => ChurchSettings, immediate = false) {
   const now = Date.now();
   setStoredLocalEditTimestamp(now);
   memoryState = updater(memoryState);
   if (typeof window !== 'undefined') {
     try {
       localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(memoryState));
+      broadcastChannel?.postMessage({ type: 'SYNC_STATE_UPDATE', payload: memoryState });
     } catch (e) {
       console.warn('Could not save church data to localStorage:', e);
     }
   }
   listeners.forEach((listener) => listener());
-  
-  // If quota is already exceeded, don't trigger automatic write attempts
-  if (isFirestoreQuotaExceeded) {
-    return;
-  }
 
-  // Quick push to Firestore with short debounce so rapid typing batches cleanly
   if (saveDebounceTimer) {
     clearTimeout(saveDebounceTimer);
+    saveDebounceTimer = null;
   }
-  saveDebounceTimer = setTimeout(() => {
-    persistToFirestore(memoryState);
-  }, 400);
+
+  if (immediate) {
+    persistToFirestore(memoryState, true);
+  } else {
+    saveDebounceTimer = setTimeout(() => {
+      persistToFirestore(memoryState, true);
+    }, 100);
+  }
 }
 
 const ChurchContext = createContext<ChurchContextType | undefined>(undefined);
@@ -307,125 +339,163 @@ export function ChurchProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
+  // Multi-tab storage event listener for cross-tab instant consistency
+  useEffect(() => {
+    const handleStorage = (e: StorageEvent) => {
+      if (e.key === LOCAL_STORAGE_KEY && e.newValue) {
+        try {
+          const sanitized = sanitizeSavedData(e.newValue);
+          memoryState = sanitized;
+          lastPersistedPayloadJson = JSON.stringify(sanitized);
+          listeners.forEach((l) => l());
+        } catch (err) {
+          console.warn('Storage sync event error:', err);
+        }
+      }
+    };
+
+    window.addEventListener('storage', handleStorage);
+    return () => {
+      window.removeEventListener('storage', handleStorage);
+    };
+  }, []);
+
   // Connect to Firebase Firestore in real-time
   useEffect(() => {
     let unsubscribe: (() => void) | undefined;
 
-    try {
-      const mainDocRef = doc(db, FIRESTORE_DOC_PATH, FIRESTORE_DOC_ID);
-      
-      unsubscribe = onSnapshot(
-        mainDocRef,
-        (snapshot) => {
-          if (snapshot.exists()) {
-            const remoteData = snapshot.data();
-            if (remoteData) {
-              const remoteTs = typeof remoteData.editTimestamp === 'number'
-                ? remoteData.editTimestamp
-                : (remoteData.lastUpdatedAt ? new Date(remoteData.lastUpdatedAt).getTime() : 0);
+    const setupFirestoreListener = () => {
+      try {
+        const mainDocRef = doc(db, FIRESTORE_DOC_PATH, FIRESTORE_DOC_ID);
+        
+        unsubscribe = onSnapshot(
+          mainDocRef,
+          { includeMetadataChanges: false },
+          (snapshot) => {
+            if (snapshot.exists()) {
+              const remoteData = snapshot.data();
+              if (remoteData) {
+                const remoteTs = typeof remoteData.editTimestamp === 'number'
+                  ? remoteData.editTimestamp
+                  : (remoteData.lastUpdatedAt ? new Date(remoteData.lastUpdatedAt).getTime() : 0);
 
-              // Ensure cloud data is the absolute, unified source of truth for all devices (Computers, Phones, Tablets)
-              const finalPhotos = Array.isArray(remoteData.photos) ? remoteData.photos : initialChurchData.photos;
-              const finalVideos = Array.isArray(remoteData.videos) ? remoteData.videos : initialChurchData.videos;
-              const finalHighlights = Array.isArray(remoteData.highlights) ? remoteData.highlights : initialChurchData.highlights;
-              const finalSchedule = Array.isArray(remoteData.worshipSchedule) ? remoteData.worshipSchedule : initialChurchData.worshipSchedule;
-              const finalEvents = Array.isArray(remoteData.upcomingEvents) ? remoteData.upcomingEvents : initialChurchData.upcomingEvents;
-              const finalSocialLinks = Array.isArray(remoteData.socialLinks) ? remoteData.socialLinks : initialChurchData.socialLinks;
-              const finalTestimonies = Array.isArray(remoteData.testimonies) ? remoteData.testimonies : initialChurchData.testimonies;
-              const finalHeroVideo = remoteData.currentActivity?.heroVideo || initialChurchData.currentActivity.heroVideo;
+                // Ensure cloud data is the absolute, unified source of truth for all devices (Computers, Phones, Tablets)
+                const finalPhotos = Array.isArray(remoteData.photos) ? remoteData.photos : initialChurchData.photos;
+                const finalVideos = Array.isArray(remoteData.videos) ? remoteData.videos : initialChurchData.videos;
+                const finalHighlights = Array.isArray(remoteData.highlights) ? remoteData.highlights : initialChurchData.highlights;
+                const finalSchedule = Array.isArray(remoteData.worshipSchedule) ? remoteData.worshipSchedule : initialChurchData.worshipSchedule;
+                const finalEvents = Array.isArray(remoteData.upcomingEvents) ? remoteData.upcomingEvents : initialChurchData.upcomingEvents;
+                const finalSocialLinks = Array.isArray(remoteData.socialLinks) ? remoteData.socialLinks : initialChurchData.socialLinks;
+                const finalTestimonies = Array.isArray(remoteData.testimonies) ? remoteData.testimonies : initialChurchData.testimonies;
+                const finalHeroVideo = remoteData.currentActivity?.heroVideo || initialChurchData.currentActivity.heroVideo;
 
-              const sanitized: ChurchSettings = {
-                ...initialChurchData,
-                ...remoteData,
-                churchName: remoteData.churchName || initialChurchData.churchName,
-                churchMotto: remoteData.churchMotto || initialChurchData.churchMotto,
-                churchAbout: remoteData.churchAbout || initialChurchData.churchAbout,
-                phone: remoteData.phone || initialChurchData.phone,
-                whatsappNumber: remoteData.whatsappNumber || initialChurchData.whatsappNumber,
-                whatsappMessage: remoteData.whatsappMessage || initialChurchData.whatsappMessage,
-                email: remoteData.email || initialChurchData.email,
-                address: remoteData.address || initialChurchData.address,
-                cityCountry: remoteData.cityCountry || initialChurchData.cityCountry,
-                currentActivity: {
-                  ...initialChurchData.currentActivity,
-                  ...(remoteData.currentActivity || {}),
-                  heroVideo: finalHeroVideo,
-                },
-                upcomingEvents: finalEvents,
-                photos: finalPhotos,
-                videos: finalVideos,
-                socialLinks: finalSocialLinks,
-                highlights: finalHighlights,
-                testimonies: finalTestimonies,
-                worshipSchedule: finalSchedule,
-                developedBy: {
-                  ...initialChurchData.developedBy,
-                  ...(remoteData.developedBy || {}),
-                },
-              };
+                const sanitized: ChurchSettings = {
+                  ...initialChurchData,
+                  ...remoteData,
+                  churchName: remoteData.churchName || initialChurchData.churchName,
+                  churchMotto: remoteData.churchMotto || initialChurchData.churchMotto,
+                  churchAbout: remoteData.churchAbout || initialChurchData.churchAbout,
+                  phone: remoteData.phone || initialChurchData.phone,
+                  whatsappNumber: remoteData.whatsappNumber || initialChurchData.whatsappNumber,
+                  whatsappMessage: remoteData.whatsappMessage || initialChurchData.whatsappMessage,
+                  email: remoteData.email || initialChurchData.email,
+                  address: remoteData.address || initialChurchData.address,
+                  cityCountry: remoteData.cityCountry || initialChurchData.cityCountry,
+                  currentActivity: {
+                    ...initialChurchData.currentActivity,
+                    ...(remoteData.currentActivity || {}),
+                    heroVideo: finalHeroVideo,
+                  },
+                  upcomingEvents: finalEvents,
+                  photos: finalPhotos,
+                  videos: finalVideos,
+                  socialLinks: finalSocialLinks,
+                  highlights: finalHighlights,
+                  testimonies: finalTestimonies,
+                  worshipSchedule: finalSchedule,
+                  developedBy: {
+                    ...initialChurchData.developedBy,
+                    ...(remoteData.developedBy || {}),
+                  },
+                };
 
-              // Update memory state and notify all UI listeners across the app
-              memoryState = sanitized;
-              if (remoteTs > 0) {
-                setStoredLocalEditTimestamp(remoteTs);
-              }
-              lastPersistedPayloadJson = JSON.stringify(sanitized);
-              if (typeof window !== 'undefined') {
-                try {
-                  localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(memoryState));
-                } catch {
-                  // ignored
+                // Update memory state and notify all UI listeners across the app
+                memoryState = sanitized;
+                if (remoteTs > 0) {
+                  setStoredLocalEditTimestamp(remoteTs);
                 }
-              }
-              listeners.forEach((l) => l());
-              setLastSyncedAt(new Date());
-              setSyncState('synced');
-            }
-          } else {
-            // First time project setup: seed current memory state to Firestore only if quota allows
-            if (!isFirestoreQuotaExceeded) {
-              persistToFirestore(memoryState).then((success) => {
+                lastPersistedPayloadJson = JSON.stringify(sanitized);
+                if (typeof window !== 'undefined') {
+                  try {
+                    localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(memoryState));
+                    broadcastChannel?.postMessage({ type: 'SYNC_STATE_UPDATE', payload: memoryState });
+                  } catch {
+                    // ignored
+                  }
+                }
+                listeners.forEach((l) => l());
                 setLastSyncedAt(new Date());
-                if (success) {
-                  setSyncState('synced');
-                }
-              });
+                setSyncState('synced');
+              }
+            } else {
+              // First time project setup: seed current memory state to Firestore only if quota allows
+              if (!isFirestoreQuotaExceeded) {
+                persistToFirestore(memoryState).then((success) => {
+                  setLastSyncedAt(new Date());
+                  if (success) {
+                    setSyncState('synced');
+                  }
+                });
+              }
             }
-          }
-          isInitialRemoteLoadDone.current = true;
-        },
-        (error) => {
-          const errObj = error as { message?: string; code?: string };
-          const errString = errObj?.message || String(error);
-          const isQuota = 
-            errString.includes('resource-exhausted') || 
-            errString.includes('Quota limit exceeded') || 
-            errString.includes('Quota exceeded') ||
-            errObj?.code === 'resource-exhausted';
+            isInitialRemoteLoadDone.current = true;
+          },
+          (error) => {
+            const errObj = error as { message?: string; code?: string };
+            const errString = errObj?.message || String(error);
+            const isQuota = 
+              errString.includes('resource-exhausted') || 
+              errString.includes('Quota limit exceeded') || 
+              errString.includes('Quota exceeded') ||
+              errObj?.code === 'resource-exhausted';
 
-          if (isQuota) {
-            isFirestoreQuotaExceeded = true;
-            setQuotaExceededStored(true);
-            setIsQuotaExceeded(true);
-            setSyncState('quota_exceeded');
-            // Unsubscribe immediately to prevent Firebase SDK exponential backoff retry spam
-            if (unsubscribe) {
-              try {
-                unsubscribe();
-                unsubscribe = undefined;
-              } catch {}
+            if (isQuota) {
+              isFirestoreQuotaExceeded = true;
+              setQuotaExceededStored(true);
+              setIsQuotaExceeded(true);
+              setSyncState('quota_exceeded');
+              if (unsubscribe) {
+                try {
+                  unsubscribe();
+                  unsubscribe = undefined;
+                } catch {}
+              }
+            } else {
+              console.warn('Firebase onSnapshot notice:', error);
+              setSyncState('offline');
             }
-          } else {
-            console.warn('Firebase onSnapshot notice:', error);
-            setSyncState('offline');
           }
-        }
-      );
-    } catch (e) {
-      console.warn('Could not establish initial Firestore listener:', e);
-    }
+        );
+      } catch (e) {
+        console.warn('Could not establish initial Firestore listener:', e);
+      }
+    };
+
+    setupFirestoreListener();
+
+    // Re-verify connection when window regains focus or comes back from background
+    const handleVisibilityOrFocus = () => {
+      if (document.visibilityState === 'visible' && !isFirestoreQuotaExceeded && !unsubscribe) {
+        setupFirestoreListener();
+      }
+    };
+
+    window.addEventListener('visibilitychange', handleVisibilityOrFocus);
+    window.addEventListener('focus', handleVisibilityOrFocus);
 
     return () => {
+      window.removeEventListener('visibilitychange', handleVisibilityOrFocus);
+      window.removeEventListener('focus', handleVisibilityOrFocus);
       if (unsubscribe) {
         try {
           unsubscribe();
@@ -493,7 +563,7 @@ export function ChurchProvider({ children }: { children: React.ReactNode }) {
     updateChurchStore((prev) => ({
       ...prev,
       photos: [newPhoto, ...prev.photos],
-    }));
+    }), true);
     setLastSyncedAt(new Date());
     if (!isFirestoreQuotaExceeded) setSyncState('synced');
   }, []);
@@ -508,7 +578,7 @@ export function ChurchProvider({ children }: { children: React.ReactNode }) {
     updateChurchStore((prev) => ({
       ...prev,
       photos: [...newPhotos, ...prev.photos],
-    }));
+    }), true);
     setLastSyncedAt(new Date());
     if (!isFirestoreQuotaExceeded) setSyncState('synced');
   }, []);
@@ -518,7 +588,7 @@ export function ChurchProvider({ children }: { children: React.ReactNode }) {
     updateChurchStore((prev) => ({
       ...prev,
       photos: prev.photos.map((p) => (p.id === id ? { ...p, ...updated } : p)),
-    }));
+    }), true);
     setLastSyncedAt(new Date());
     if (!isFirestoreQuotaExceeded) setSyncState('synced');
   }, []);
@@ -528,7 +598,7 @@ export function ChurchProvider({ children }: { children: React.ReactNode }) {
     updateChurchStore((prev) => ({
       ...prev,
       photos: prev.photos.filter((p) => p.id !== id),
-    }));
+    }), true);
     setLastSyncedAt(new Date());
     if (!isFirestoreQuotaExceeded) setSyncState('synced');
   }, []);
@@ -542,7 +612,7 @@ export function ChurchProvider({ children }: { children: React.ReactNode }) {
     updateChurchStore((prev) => ({
       ...prev,
       videos: [newVideo, ...prev.videos],
-    }));
+    }), true);
     setLastSyncedAt(new Date());
     if (!isFirestoreQuotaExceeded) setSyncState('synced');
   }, []);
@@ -552,7 +622,7 @@ export function ChurchProvider({ children }: { children: React.ReactNode }) {
     updateChurchStore((prev) => ({
       ...prev,
       videos: prev.videos.map((v) => (v.id === id ? { ...v, ...updated } : v)),
-    }));
+    }), true);
     setLastSyncedAt(new Date());
     if (!isFirestoreQuotaExceeded) setSyncState('synced');
   }, []);
@@ -563,7 +633,7 @@ export function ChurchProvider({ children }: { children: React.ReactNode }) {
     updateChurchStore((prev) => ({
       ...prev,
       videos: prev.videos.filter((v) => v.id !== id),
-    }));
+    }), true);
     setLastSyncedAt(new Date());
     if (!isFirestoreQuotaExceeded) setSyncState('synced');
   }, []);
@@ -578,7 +648,7 @@ export function ChurchProvider({ children }: { children: React.ReactNode }) {
         ...prev,
         videos: [target, ...filtered],
       };
-    });
+    }, true);
     setLastSyncedAt(new Date());
     if (!isFirestoreQuotaExceeded) setSyncState('synced');
   }, []);
@@ -589,7 +659,7 @@ export function ChurchProvider({ children }: { children: React.ReactNode }) {
     updateChurchStore((prev) => ({
       ...prev,
       videos: initialChurchData.videos,
-    }));
+    }), true);
     setLastSyncedAt(new Date());
     if (!isFirestoreQuotaExceeded) setSyncState('synced');
   }, []);
@@ -600,7 +670,7 @@ export function ChurchProvider({ children }: { children: React.ReactNode }) {
     updateChurchStore((prev) => ({
       ...prev,
       videos: [],
-    }));
+    }), true);
     setLastSyncedAt(new Date());
     if (!isFirestoreQuotaExceeded) setSyncState('synced');
   }, []);
@@ -614,7 +684,7 @@ export function ChurchProvider({ children }: { children: React.ReactNode }) {
     updateChurchStore((prev) => ({
       ...prev,
       upcomingEvents: [newEvent, ...prev.upcomingEvents],
-    }));
+    }), true);
     setLastSyncedAt(new Date());
     if (!isFirestoreQuotaExceeded) setSyncState('synced');
   }, []);
@@ -624,7 +694,7 @@ export function ChurchProvider({ children }: { children: React.ReactNode }) {
     updateChurchStore((prev) => ({
       ...prev,
       upcomingEvents: prev.upcomingEvents.map((ev) => (ev.id === id ? { ...ev, ...updated } : ev)),
-    }));
+    }), true);
     setLastSyncedAt(new Date());
     if (!isFirestoreQuotaExceeded) setSyncState('synced');
   }, []);
@@ -634,7 +704,7 @@ export function ChurchProvider({ children }: { children: React.ReactNode }) {
     updateChurchStore((prev) => ({
       ...prev,
       upcomingEvents: prev.upcomingEvents.filter((ev) => ev.id !== id),
-    }));
+    }), true);
     setLastSyncedAt(new Date());
     if (!isFirestoreQuotaExceeded) setSyncState('synced');
   }, []);
@@ -646,7 +716,7 @@ export function ChurchProvider({ children }: { children: React.ReactNode }) {
       socialLinks: prev.socialLinks.map((item) =>
         item.id === id ? { ...item, ...updated } : item
       ),
-    }));
+    }), true);
     setLastSyncedAt(new Date());
     if (!isFirestoreQuotaExceeded) setSyncState('synced');
   }, []);
@@ -660,7 +730,7 @@ export function ChurchProvider({ children }: { children: React.ReactNode }) {
     updateChurchStore((prev) => ({
       ...prev,
       highlights: [...prev.highlights, newHighlight],
-    }));
+    }), true);
     setLastSyncedAt(new Date());
     if (!isFirestoreQuotaExceeded) setSyncState('synced');
   }, []);
@@ -672,7 +742,7 @@ export function ChurchProvider({ children }: { children: React.ReactNode }) {
       highlights: prev.highlights.map((item) =>
         item.id === id ? { ...item, ...updated } : item
       ),
-    }));
+    }), true);
     setLastSyncedAt(new Date());
     if (!isFirestoreQuotaExceeded) setSyncState('synced');
   }, []);
@@ -682,7 +752,7 @@ export function ChurchProvider({ children }: { children: React.ReactNode }) {
     updateChurchStore((prev) => ({
       ...prev,
       highlights: prev.highlights.filter((item) => item.id !== id),
-    }));
+    }), true);
     setLastSyncedAt(new Date());
     if (!isFirestoreQuotaExceeded) setSyncState('synced');
   }, []);
@@ -692,7 +762,7 @@ export function ChurchProvider({ children }: { children: React.ReactNode }) {
     updateChurchStore((prev) => ({
       ...prev,
       highlights: initialChurchData.highlights,
-    }));
+    }), true);
     setLastSyncedAt(new Date());
     if (!isFirestoreQuotaExceeded) setSyncState('synced');
   }, []);
@@ -704,7 +774,7 @@ export function ChurchProvider({ children }: { children: React.ReactNode }) {
       testimonies: prev.testimonies.map((item) =>
         item.id === id ? { ...item, ...updated } : item
       ),
-    }));
+    }), true);
     setLastSyncedAt(new Date());
     if (!isFirestoreQuotaExceeded) setSyncState('synced');
   }, []);
@@ -717,7 +787,7 @@ export function ChurchProvider({ children }: { children: React.ReactNode }) {
         copy[index] = { ...copy[index], ...updated };
       }
       return { ...prev, worshipSchedule: copy };
-    });
+    }, true);
     setLastSyncedAt(new Date());
     if (!isFirestoreQuotaExceeded) setSyncState('synced');
   }, []);
@@ -727,7 +797,7 @@ export function ChurchProvider({ children }: { children: React.ReactNode }) {
     updateChurchStore((prev) => ({
       ...prev,
       worshipSchedule: [...prev.worshipSchedule, item],
-    }));
+    }), true);
     setLastSyncedAt(new Date());
     if (!isFirestoreQuotaExceeded) setSyncState('synced');
   }, []);
@@ -737,7 +807,7 @@ export function ChurchProvider({ children }: { children: React.ReactNode }) {
     updateChurchStore((prev) => ({
       ...prev,
       worshipSchedule: prev.worshipSchedule.filter((_, idx) => idx !== index),
-    }));
+    }), true);
     setLastSyncedAt(new Date());
     if (!isFirestoreQuotaExceeded) setSyncState('synced');
   }, []);
@@ -746,7 +816,7 @@ export function ChurchProvider({ children }: { children: React.ReactNode }) {
     setSyncState(isFirestoreQuotaExceeded ? 'quota_exceeded' : 'syncing');
     clearAllStoredVideoBlobs();
     clearHeroVideoBlob();
-    updateChurchStore(() => initialChurchData);
+    updateChurchStore(() => initialChurchData, true);
     if (typeof window !== 'undefined') {
       try {
         localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(initialChurchData));
