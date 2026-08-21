@@ -45,7 +45,10 @@ import {
   MapPin,
   Clock,
   User,
-  MessageCircle
+  MessageCircle,
+  Globe,
+  Copy,
+  Download
 } from 'lucide-react';
 
 export function AdminManagerModal() {
@@ -85,7 +88,7 @@ function AdminManagerModalInner() {
     firebaseConsoleUrl
   } = useChurch();
 
-  const [activeTab, setActiveTab] = useState<'activity' | 'highlights' | 'photos' | 'videos' | 'social' | 'church' | 'events'>('activity');
+  const [activeTab, setActiveTab] = useState<'activity' | 'highlights' | 'photos' | 'videos' | 'social' | 'church' | 'events' | 'cloud'>('activity');
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
   // Video Upload States
@@ -776,6 +779,7 @@ function AdminManagerModalInner() {
             { id: 'events', label: `Próximas Atividades (${data.upcomingEvents.length})`, icon: Calendar },
             { id: 'social', label: 'Redes Sociais & Links', icon: Share2 },
             { id: 'church', label: 'Igreja & Contactos', icon: Phone },
+            { id: 'cloud', label: 'Nuvem & Vercel', icon: Globe },
           ].map((tab) => {
             const Icon = tab.icon;
             return (
@@ -2712,6 +2716,128 @@ function AdminManagerModalInner() {
                 </button>
               </div>
             </form>
+          )}
+
+          {/* TAB 7: NUVEM, VERCEL & SINCRONIZAÇÃO GLOBAL */}
+          {activeTab === 'cloud' && (
+            <div className="space-y-6">
+              {/* Status Header Box */}
+              <div className="p-5 rounded-sm bg-neutral-900 text-white border border-neutral-800 shadow-md">
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                  <div className="flex items-start gap-3.5">
+                    <div className="w-10 h-10 rounded-sm bg-[#C5A059]/20 text-[#C5A059] flex items-center justify-center shrink-0 border border-[#C5A059]/30">
+                      <Globe className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <h3 className="text-sm font-bold tracking-wide text-white flex items-center gap-2">
+                        <span>Sincronização em Tempo Real (Vercel, Celulares e Outros Navegadores)</span>
+                        <span className="text-[9px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                          Ativo
+                        </span>
+                      </h3>
+                      <p className="text-xs text-neutral-400 font-light mt-1 max-w-2xl leading-relaxed">
+                        Todas as informações alteradas aqui são salvas no banco de dados na nuvem (Google Cloud Firestore). Qualquer visitante em <strong>cruzadadodr.vercel.app</strong>, no Chrome, Safari, Edge ou telemóvel recebe as atualizações instantaneamente.
+                      </p>
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      showNotification('A sincronizar com a Nuvem e Vercel...');
+                      const ok = await syncNowWithCloud();
+                      if (ok) {
+                        showNotification('✓ Sucesso! Dados salvos na nuvem. Todos os navegadores e Vercel já estão sincronizados.');
+                      } else {
+                        showNotification('Dados gravados localmente e na fila da nuvem.');
+                      }
+                    }}
+                    className="flex items-center justify-center gap-2 px-5 py-3 rounded-sm font-bold text-xs uppercase tracking-wider text-black bg-[#C5A059] hover:bg-[#D4AF37] transition-all shadow-lg cursor-pointer shrink-0"
+                  >
+                    <RefreshCw className={`w-4 h-4 ${syncState === 'syncing' ? 'animate-spin' : ''}`} />
+                    <span>Sincronizar Tudo com Vercel Agora</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Step by Step Explanation for Vercel */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="p-4 rounded-sm border border-neutral-200 bg-neutral-50/50">
+                  <div className="flex items-center gap-2 mb-2">
+                    <Database className="w-4 h-4 text-[#C5A059]" />
+                    <h4 className="text-xs font-bold uppercase tracking-wider text-neutral-900">
+                      1. Banco de Dados na Nuvem (Automático)
+                    </h4>
+                  </div>
+                  <p className="text-xs text-neutral-600 font-light leading-relaxed">
+                    Sempre que você clica em <strong>Salvar</strong> em qualquer aba deste painel, o sistema transmite os textos, fotos e vídeos para o Firestore do projeto <strong>{firebaseProjectId}</strong>. O Vercel consulta esta mesma base e atualiza a tela sem você precisar mexer em código.
+                  </p>
+                </div>
+
+                <div className="p-4 rounded-sm border border-neutral-200 bg-neutral-50/50">
+                  <div className="flex items-center gap-2 mb-2">
+                    <Cloud className="w-4 h-4 text-[#C5A059]" />
+                    <h4 className="text-xs font-bold uppercase tracking-wider text-neutral-900">
+                      2. Exportação para Deploy no GitHub / Vercel
+                    </h4>
+                  </div>
+                  <p className="text-xs text-neutral-600 font-light leading-relaxed">
+                    Se você deseja que o código fonte do repositório no GitHub já venha com todos os seus textos pré-configurados como padrão de fábrica, utilize o botão de exportação abaixo.
+                  </p>
+                </div>
+              </div>
+
+              {/* Quick JSON Export / Backup */}
+              <div className="p-4 rounded-sm border border-neutral-200 bg-white space-y-3">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div>
+                    <h4 className="text-xs font-bold uppercase tracking-wider text-neutral-900 flex items-center gap-2">
+                      <Download className="w-3.5 h-3.5 text-[#C5A059]" />
+                      <span>Backup & Exportação dos Dados Atuais</span>
+                    </h4>
+                    <p className="text-[11px] text-neutral-500 font-light mt-0.5">
+                      Copie ou baixe o arquivo JSON com todo o conteúdo atual da catedral para guardar ou importar no código.
+                    </p>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const jsonStr = JSON.stringify(data, null, 2);
+                        navigator.clipboard?.writeText(jsonStr);
+                        showNotification('✓ JSON copiado para a área de transferência!');
+                      }}
+                      className="inline-flex items-center gap-1.5 px-3 py-2 rounded-sm border border-neutral-300 bg-neutral-50 hover:bg-neutral-100 text-neutral-800 text-[11px] font-bold uppercase tracking-wider transition-colors cursor-pointer"
+                    >
+                      <Copy className="w-3.5 h-3.5 text-neutral-600" />
+                      <span>Copiar JSON</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const jsonStr = JSON.stringify(data, null, 2);
+                        const blob = new Blob([jsonStr], { type: 'application/json' });
+                        const url = URL.createObjectURL(blob);
+                        const a = document.createElement('a');
+                        a.href = url;
+                        a.download = `catedral_dados_${new Date().toISOString().slice(0, 10)}.json`;
+                        document.body.appendChild(a);
+                        a.click();
+                        document.body.removeChild(a);
+                        URL.revokeObjectURL(url);
+                        showNotification('✓ Ficheiro de backup baixado com sucesso!');
+                      }}
+                      className="inline-flex items-center gap-1.5 px-3 py-2 rounded-sm bg-[#1A1A1A] hover:bg-[#C5A059] text-white text-[11px] font-bold uppercase tracking-wider transition-colors cursor-pointer"
+                    >
+                      <Download className="w-3.5 h-3.5" />
+                      <span>Baixar Ficheiro</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
           )}
         </div>
 

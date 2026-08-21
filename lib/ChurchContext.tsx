@@ -36,7 +36,7 @@ interface ChurchContextType {
   addWorshipScheduleItem: (item: { day: string; time: string; name: string }) => void;
   removeWorshipScheduleItem: (index: number) => void;
   resetToDefaults: () => void;
-  syncNowWithCloud: () => Promise<void>;
+  syncNowWithCloud: () => Promise<boolean>;
   isAdminOpen: boolean;
   setIsAdminOpen: (open: boolean) => void;
   syncState: SyncState;
@@ -73,16 +73,6 @@ function setStoredLocalEditTimestamp(ts: number) {
 }
 
 function checkIsQuotaExceededStored(): boolean {
-  if (typeof window === 'undefined') return false;
-  try {
-    const raw = localStorage.getItem(QUOTA_STORAGE_KEY);
-    if (!raw) return false;
-    const ts = parseInt(raw, 10);
-    // Quota cooldown: treat as exceeded for 4 hours unless manually reconnected
-    if (Date.now() - ts < 4 * 60 * 60 * 1000) {
-      return true;
-    }
-  } catch {}
   return false;
 }
 
@@ -439,7 +429,7 @@ export function ChurchProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
-  const syncNowWithCloud = useCallback(async () => {
+  const syncNowWithCloud = useCallback(async (): Promise<boolean> => {
     setSyncState('syncing');
     try {
       // Clear quota flag to test if quota has reset
@@ -453,13 +443,16 @@ export function ChurchProvider({ children }: { children: React.ReactNode }) {
         setSyncState('synced');
         setIsQuotaExceeded(false);
         setQuotaExceededStored(false);
+        return true;
       } else {
         setSyncState('quota_exceeded');
         setIsQuotaExceeded(true);
         setQuotaExceededStored(true);
+        return false;
       }
     } catch {
       setSyncState('offline');
+      return false;
     }
   }, []);
 

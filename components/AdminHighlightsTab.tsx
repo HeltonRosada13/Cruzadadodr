@@ -43,7 +43,7 @@ interface AdminHighlightsTabProps {
   updateHighlight: (id: string, updated: Partial<HighlightMoment>) => void;
   removeHighlight: (id: string) => void;
   resetHighlightsToDefaults: () => void;
-  syncNowWithCloud: () => Promise<void>;
+  syncNowWithCloud: () => Promise<boolean | void>;
   showNotification: (msg: string) => void;
 }
 
