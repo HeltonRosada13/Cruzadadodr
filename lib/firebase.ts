@@ -6,9 +6,9 @@ import {
   doc, 
   setDoc, 
   getDoc, 
-  onSnapshot,
-  collection,
-  addDoc,
+  onSnapshot, 
+  collection, 
+  addDoc, 
   serverTimestamp 
 } from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
@@ -24,17 +24,14 @@ try {
     app = getApp();
   }
 
-  const firestoreDatabaseId = firebaseConfig.firestoreDatabaseId;
-  if (firestoreDatabaseId && firestoreDatabaseId !== '(default)' && firestoreDatabaseId !== '') {
-    db = getFirestore(app, firestoreDatabaseId);
-  } else {
-    db = getFirestore(app);
-  }
+  const firestoreDatabaseId = firebaseConfig.firestoreDatabaseId || 'ai-studio-igrejacatedralde-1689f903-4252-4c97-842d-c7bb1fa516bf';
+  db = getFirestore(app, firestoreDatabaseId);
   auth = getAuth(app);
 } catch (error) {
-  console.warn('Firebase initialization error, fallback to default app:', error);
+  console.warn('Firebase initialization notice:', error);
   app = getApps().length ? getApp() : initializeApp(firebaseConfig);
-  db = getFirestore(app);
+  const firestoreDatabaseId = firebaseConfig.firestoreDatabaseId || 'ai-studio-igrejacatedralde-1689f903-4252-4c97-842d-c7bb1fa516bf';
+  db = getFirestore(app, firestoreDatabaseId);
   auth = getAuth(app);
 }
 

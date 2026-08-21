@@ -227,7 +227,105 @@ function subscribeChurchStore(listener: () => void) {
   };
 }
 
-// Function to write directly to Firebase Firestore with automatic debouncing and error handling
+import firebaseConfig from '../firebase-applet-config.json';
+
+const FIRESTORE_DATABASE_ID = firebaseConfig.firestoreDatabaseId || 'ai-studio-igrejacatedralde-1689f903-4252-4c97-842d-c7bb1fa516bf';
+const FIRESTORE_REST_URL = `https://firestore.googleapis.com/v1/projects/${firebaseConfig.projectId}/databases/${FIRESTORE_DATABASE_ID}/documents/${FIRESTORE_DOC_PATH}/${FIRESTORE_DOC_ID}`;
+
+function parseFirestoreValue(val: any): any {
+  if (!val || typeof val !== 'object') return null;
+  if ('stringValue' in val) return val.stringValue;
+  if ('booleanValue' in val) return val.booleanValue;
+  if ('integerValue' in val) return Number(val.integerValue);
+  if ('doubleValue' in val) return Number(val.doubleValue);
+  if ('arrayValue' in val) {
+    return (val.arrayValue.values || []).map(parseFirestoreValue);
+  }
+  if ('mapValue' in val) {
+    const res: Record<string, any> = {};
+    for (const [k, v] of Object.entries(val.mapValue.fields || {})) {
+      res[k] = parseFirestoreValue(v);
+    }
+    return res;
+  }
+  return null;
+}
+
+function parseFirestoreRestDoc(docData: any): Record<string, any> | null {
+  if (!docData || !docData.fields) return null;
+  const res: Record<string, any> = {};
+  for (const [k, v] of Object.entries(docData.fields)) {
+    res[k] = parseFirestoreValue(v);
+  }
+  return res;
+}
+
+function toFirestoreRestValue(val: any): any {
+  if (val === null || val === undefined) return { nullValue: null };
+  if (typeof val === 'string') return { stringValue: val };
+  if (typeof val === 'boolean') return { booleanValue: val };
+  if (typeof val === 'number') {
+    return Number.isInteger(val) ? { integerValue: String(val) } : { doubleValue: val };
+  }
+  if (Array.isArray(val)) {
+    return { arrayValue: { values: val.map(toFirestoreRestValue) } };
+  }
+  if (typeof val === 'object') {
+    const fields: Record<string, any> = {};
+    for (const [k, v] of Object.entries(val)) {
+      if (v !== undefined) {
+        fields[k] = toFirestoreRestValue(v);
+      }
+    }
+    return { mapValue: { fields } };
+  }
+  return { stringValue: String(val) };
+}
+
+function toFirestoreRestDoc(obj: Record<string, any>): { fields: Record<string, any> } {
+  const fields: Record<string, any> = {};
+  for (const [k, v] of Object.entries(obj)) {
+    if (v !== undefined) {
+      fields[k] = toFirestoreRestValue(v);
+    }
+  }
+  return { fields };
+}
+
+async function fetchFirestoreRestDoc(): Promise<Record<string, any> | null> {
+  try {
+    const res = await fetch(FIRESTORE_REST_URL, {
+      method: 'GET',
+      headers: { 'Accept': 'application/json' },
+      cache: 'no-store',
+    });
+    if (res.ok) {
+      const data = await res.json();
+      return parseFirestoreRestDoc(data);
+    }
+  } catch (err) {
+    console.warn('REST API fetch notice:', err);
+  }
+  return null;
+}
+
+async function saveFirestoreRestDoc(state: Record<string, any>): Promise<boolean> {
+  try {
+    const payload = toFirestoreRestDoc(state);
+    const res = await fetch(FIRESTORE_REST_URL, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    });
+    return res.ok;
+  } catch (err) {
+    console.warn('REST API patch notice:', err);
+    return false;
+  }
+}
 async function persistToFirestore(state: ChurchSettings, force = false): Promise<boolean> {
   if (typeof window === 'undefined') return false;
 
@@ -238,42 +336,50 @@ async function persistToFirestore(state: ChurchSettings, force = false): Promise
   }
 
   const path = `${FIRESTORE_DOC_PATH}/${FIRESTORE_DOC_ID}`;
+  let writeSucceeded = false;
+
+  const editTimestamp = getStoredLocalEditTimestamp() || Date.now();
+  
+  // Deep clone and strip any undefined keys to guarantee clean Firestore compatibility
+  const safePayload = JSON.parse(JSON.stringify({
+    ...state,
+    editTimestamp,
+    lastUpdatedAt: new Date().toISOString(),
+  }));
+
+  // 1. Dual Channel Write: REST API (works across all browsers/networks)
   try {
-    const editTimestamp = getStoredLocalEditTimestamp() || Date.now();
+    const restOk = await saveFirestoreRestDoc(safePayload);
+    if (restOk) {
+      writeSucceeded = true;
+    }
+  } catch (err) {
+    console.warn('Dual-write REST error:', err);
+  }
+
+  // 2. Dual Channel Write: Firestore Web SDK
+  try {
     const mainDocRef = doc(db, FIRESTORE_DOC_PATH, FIRESTORE_DOC_ID);
-    await setDoc(mainDocRef, {
-      ...state,
-      editTimestamp,
-      lastUpdatedAt: new Date().toISOString(),
-    }, { merge: true });
-    
+    await setDoc(mainDocRef, safePayload, { merge: true });
+    writeSucceeded = true;
+  } catch (err: unknown) {
+    console.warn('Dual-write SDK notice:', err);
+    try {
+      handleFirestoreError(err, OperationType.WRITE, path);
+    } catch {
+      // Ignored
+    }
+  }
+
+  if (writeSucceeded) {
     lastPersistedPayloadJson = currentPayloadJson;
     isFirestoreQuotaExceeded = false;
     setQuotaExceededStored(false);
     if (onQuotaStateChange) onQuotaStateChange(false);
     return true;
-  } catch (err: unknown) {
-    const errObj = err as { message?: string; code?: string };
-    const errString = errObj?.message || String(err);
-    const isQuotaErr = 
-      errString.includes('resource-exhausted') || 
-      errString.includes('Quota limit exceeded') || 
-      errString.includes('Quota exceeded') ||
-      errObj?.code === 'resource-exhausted';
-
-    if (isQuotaErr) {
-      isFirestoreQuotaExceeded = true;
-      setQuotaExceededStored(true);
-      if (onQuotaStateChange) onQuotaStateChange(true);
-    }
-
-    try {
-      handleFirestoreError(err, OperationType.WRITE, path);
-    } catch {
-      // Ignored for graceful UI continuation
-    }
-    return false;
   }
+
+  return false;
 }
 
 function updateChurchStore(updater: (prev: ChurchSettings) => ChurchSettings, immediate = false) {
@@ -364,10 +470,100 @@ export function ChurchProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     let unsubscribe: (() => void) | undefined;
 
+    const applyRemoteData = (remoteData: Record<string, any>) => {
+      const remoteTs = typeof remoteData.editTimestamp === 'number'
+        ? remoteData.editTimestamp
+        : (remoteData.lastUpdatedAt ? new Date(remoteData.lastUpdatedAt).getTime() : 0);
+
+      const finalPhotos = Array.isArray(remoteData.photos) ? remoteData.photos : initialChurchData.photos;
+      const finalVideos = Array.isArray(remoteData.videos) ? remoteData.videos : initialChurchData.videos;
+      const finalHighlights = Array.isArray(remoteData.highlights) ? remoteData.highlights : initialChurchData.highlights;
+      const finalSchedule = Array.isArray(remoteData.worshipSchedule) ? remoteData.worshipSchedule : initialChurchData.worshipSchedule;
+      const finalEvents = Array.isArray(remoteData.upcomingEvents) ? remoteData.upcomingEvents : initialChurchData.upcomingEvents;
+      const finalSocialLinks = Array.isArray(remoteData.socialLinks) ? remoteData.socialLinks : initialChurchData.socialLinks;
+      const finalTestimonies = Array.isArray(remoteData.testimonies) ? remoteData.testimonies : initialChurchData.testimonies;
+      const finalHeroVideo = remoteData.currentActivity?.heroVideo || initialChurchData.currentActivity.heroVideo;
+
+      const sanitized: ChurchSettings = {
+        ...initialChurchData,
+        ...remoteData,
+        churchName: remoteData.churchName || initialChurchData.churchName,
+        churchMotto: remoteData.churchMotto || initialChurchData.churchMotto,
+        churchAbout: remoteData.churchAbout || initialChurchData.churchAbout,
+        phone: remoteData.phone || initialChurchData.phone,
+        whatsappNumber: remoteData.whatsappNumber || initialChurchData.whatsappNumber,
+        whatsappMessage: remoteData.whatsappMessage || initialChurchData.whatsappMessage,
+        email: remoteData.email || initialChurchData.email,
+        address: remoteData.address || initialChurchData.address,
+        cityCountry: remoteData.cityCountry || initialChurchData.cityCountry,
+        currentActivity: {
+          ...initialChurchData.currentActivity,
+          ...(remoteData.currentActivity || {}),
+          heroVideo: finalHeroVideo,
+        },
+        upcomingEvents: finalEvents,
+        photos: finalPhotos,
+        videos: finalVideos,
+        socialLinks: finalSocialLinks,
+        highlights: finalHighlights,
+        testimonies: finalTestimonies,
+        worshipSchedule: finalSchedule,
+        developedBy: {
+          ...initialChurchData.developedBy,
+          ...(remoteData.developedBy || {}),
+        },
+      };
+
+      memoryState = sanitized;
+      if (remoteTs > 0) {
+        setStoredLocalEditTimestamp(remoteTs);
+      }
+      lastPersistedPayloadJson = JSON.stringify(sanitized);
+      if (typeof window !== 'undefined') {
+        try {
+          localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(memoryState));
+          broadcastChannel?.postMessage({ type: 'SYNC_STATE_UPDATE', payload: memoryState });
+        } catch {
+          // ignored
+        }
+      }
+      listeners.forEach((l) => l());
+      setLastSyncedAt(new Date());
+      setSyncState('synced');
+    };
+
     const setupFirestoreListener = () => {
+      // 1. Instant REST Hydration (works in 100% of browsers immediately on mount)
+      fetchFirestoreRestDoc()
+        .then((remoteData) => {
+          if (remoteData) {
+            applyRemoteData(remoteData);
+          }
+        })
+        .catch((err) => {
+          console.warn('Initial REST load notice:', err);
+        });
+
       try {
         const mainDocRef = doc(db, FIRESTORE_DOC_PATH, FIRESTORE_DOC_ID);
         
+        // 2. Initial direct fetch from Web SDK
+        getDoc(mainDocRef)
+          .then((snap) => {
+            if (snap.exists()) {
+              const data = snap.data();
+              if (data) {
+                applyRemoteData(data);
+              }
+            } else {
+              persistToFirestore(memoryState, true);
+            }
+          })
+          .catch((e) => {
+            console.warn('Initial direct getDoc note:', e);
+          });
+
+        // 3. Real-time snapshot stream from Web SDK
         unsubscribe = onSnapshot(
           mainDocRef,
           { includeMetadataChanges: false },
@@ -375,82 +571,20 @@ export function ChurchProvider({ children }: { children: React.ReactNode }) {
             if (snapshot.exists()) {
               const remoteData = snapshot.data();
               if (remoteData) {
-                const remoteTs = typeof remoteData.editTimestamp === 'number'
-                  ? remoteData.editTimestamp
-                  : (remoteData.lastUpdatedAt ? new Date(remoteData.lastUpdatedAt).getTime() : 0);
-
-                // Ensure cloud data is the absolute, unified source of truth for all devices (Computers, Phones, Tablets)
-                const finalPhotos = Array.isArray(remoteData.photos) ? remoteData.photos : initialChurchData.photos;
-                const finalVideos = Array.isArray(remoteData.videos) ? remoteData.videos : initialChurchData.videos;
-                const finalHighlights = Array.isArray(remoteData.highlights) ? remoteData.highlights : initialChurchData.highlights;
-                const finalSchedule = Array.isArray(remoteData.worshipSchedule) ? remoteData.worshipSchedule : initialChurchData.worshipSchedule;
-                const finalEvents = Array.isArray(remoteData.upcomingEvents) ? remoteData.upcomingEvents : initialChurchData.upcomingEvents;
-                const finalSocialLinks = Array.isArray(remoteData.socialLinks) ? remoteData.socialLinks : initialChurchData.socialLinks;
-                const finalTestimonies = Array.isArray(remoteData.testimonies) ? remoteData.testimonies : initialChurchData.testimonies;
-                const finalHeroVideo = remoteData.currentActivity?.heroVideo || initialChurchData.currentActivity.heroVideo;
-
-                const sanitized: ChurchSettings = {
-                  ...initialChurchData,
-                  ...remoteData,
-                  churchName: remoteData.churchName || initialChurchData.churchName,
-                  churchMotto: remoteData.churchMotto || initialChurchData.churchMotto,
-                  churchAbout: remoteData.churchAbout || initialChurchData.churchAbout,
-                  phone: remoteData.phone || initialChurchData.phone,
-                  whatsappNumber: remoteData.whatsappNumber || initialChurchData.whatsappNumber,
-                  whatsappMessage: remoteData.whatsappMessage || initialChurchData.whatsappMessage,
-                  email: remoteData.email || initialChurchData.email,
-                  address: remoteData.address || initialChurchData.address,
-                  cityCountry: remoteData.cityCountry || initialChurchData.cityCountry,
-                  currentActivity: {
-                    ...initialChurchData.currentActivity,
-                    ...(remoteData.currentActivity || {}),
-                    heroVideo: finalHeroVideo,
-                  },
-                  upcomingEvents: finalEvents,
-                  photos: finalPhotos,
-                  videos: finalVideos,
-                  socialLinks: finalSocialLinks,
-                  highlights: finalHighlights,
-                  testimonies: finalTestimonies,
-                  worshipSchedule: finalSchedule,
-                  developedBy: {
-                    ...initialChurchData.developedBy,
-                    ...(remoteData.developedBy || {}),
-                  },
-                };
-
-                // Update memory state and notify all UI listeners across the app
-                memoryState = sanitized;
-                if (remoteTs > 0) {
-                  setStoredLocalEditTimestamp(remoteTs);
-                }
-                lastPersistedPayloadJson = JSON.stringify(sanitized);
-                if (typeof window !== 'undefined') {
-                  try {
-                    localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(memoryState));
-                    broadcastChannel?.postMessage({ type: 'SYNC_STATE_UPDATE', payload: memoryState });
-                  } catch {
-                    // ignored
-                  }
-                }
-                listeners.forEach((l) => l());
-                setLastSyncedAt(new Date());
-                setSyncState('synced');
+                applyRemoteData(remoteData);
               }
             } else {
-              // First time project setup: seed current memory state to Firestore only if quota allows
-              if (!isFirestoreQuotaExceeded) {
-                persistToFirestore(memoryState).then((success) => {
-                  setLastSyncedAt(new Date());
-                  if (success) {
-                    setSyncState('synced');
-                  }
-                });
-              }
+              persistToFirestore(memoryState, true).then((success) => {
+                setLastSyncedAt(new Date());
+                if (success) {
+                  setSyncState('synced');
+                }
+              });
             }
             isInitialRemoteLoadDone.current = true;
           },
           (error) => {
+            console.warn('Firebase onSnapshot notice:', error);
             const errObj = error as { message?: string; code?: string };
             const errString = errObj?.message || String(error);
             const isQuota = 
@@ -460,18 +594,8 @@ export function ChurchProvider({ children }: { children: React.ReactNode }) {
               errObj?.code === 'resource-exhausted';
 
             if (isQuota) {
-              isFirestoreQuotaExceeded = true;
-              setQuotaExceededStored(true);
-              setIsQuotaExceeded(true);
               setSyncState('quota_exceeded');
-              if (unsubscribe) {
-                try {
-                  unsubscribe();
-                  unsubscribe = undefined;
-                } catch {}
-              }
             } else {
-              console.warn('Firebase onSnapshot notice:', error);
               setSyncState('offline');
             }
           }
@@ -483,9 +607,32 @@ export function ChurchProvider({ children }: { children: React.ReactNode }) {
 
     setupFirestoreListener();
 
+    // 4. Background REST Poller to guarantee cross-browser & mobile instant updates
+    const pollInterval = setInterval(() => {
+      fetchFirestoreRestDoc().then((remoteData) => {
+        if (remoteData) {
+          const remoteTs = typeof remoteData.editTimestamp === 'number'
+            ? remoteData.editTimestamp
+            : (remoteData.lastUpdatedAt ? new Date(remoteData.lastUpdatedAt).getTime() : 0);
+          const currentLocalTs = getStoredLocalEditTimestamp() || 0;
+          
+          // If remote server has a newer or different edit timestamp, sync immediately
+          if (remoteTs > currentLocalTs || (remoteTs > 0 && Math.abs(remoteTs - currentLocalTs) > 500)) {
+            applyRemoteData(remoteData);
+          }
+        }
+      }).catch(() => {
+        // silent
+      });
+    }, 3500);
+
     // Re-verify connection when window regains focus or comes back from background
     const handleVisibilityOrFocus = () => {
-      if (document.visibilityState === 'visible' && !isFirestoreQuotaExceeded && !unsubscribe) {
+      fetchFirestoreRestDoc().then((remoteData) => {
+        if (remoteData) applyRemoteData(remoteData);
+      }).catch(() => {});
+
+      if (document.visibilityState === 'visible' && !unsubscribe) {
         setupFirestoreListener();
       }
     };
@@ -494,6 +641,7 @@ export function ChurchProvider({ children }: { children: React.ReactNode }) {
     window.addEventListener('focus', handleVisibilityOrFocus);
 
     return () => {
+      clearInterval(pollInterval);
       window.removeEventListener('visibilitychange', handleVisibilityOrFocus);
       window.removeEventListener('focus', handleVisibilityOrFocus);
       if (unsubscribe) {
@@ -507,22 +655,15 @@ export function ChurchProvider({ children }: { children: React.ReactNode }) {
   const syncNowWithCloud = useCallback(async (): Promise<boolean> => {
     setSyncState('syncing');
     try {
-      // Clear quota flag to test if quota has reset
-      isFirestoreQuotaExceeded = false;
-      setQuotaExceededStored(false);
-      setIsQuotaExceeded(false);
-
       const ok = await persistToFirestore(memoryState, true);
       if (ok) {
         setLastSyncedAt(new Date());
         setSyncState('synced');
         setIsQuotaExceeded(false);
-        setQuotaExceededStored(false);
         return true;
       } else {
         setSyncState('quota_exceeded');
         setIsQuotaExceeded(true);
-        setQuotaExceededStored(true);
         return false;
       }
     } catch {
@@ -532,26 +673,26 @@ export function ChurchProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const updateCurrentActivity = useCallback((activityUpdate: Partial<ChurchActivity>) => {
-    setSyncState(isFirestoreQuotaExceeded ? 'quota_exceeded' : 'syncing');
+    setSyncState('syncing');
     updateChurchStore((prev) => ({
       ...prev,
       currentActivity: {
         ...prev.currentActivity,
         ...activityUpdate,
       },
-    }));
+    }), true);
     setLastSyncedAt(new Date());
-    if (!isFirestoreQuotaExceeded) setSyncState('synced');
+    setSyncState('synced');
   }, []);
 
   const updateChurchInfo = useCallback((infoUpdate: Partial<ChurchSettings>) => {
-    setSyncState(isFirestoreQuotaExceeded ? 'quota_exceeded' : 'syncing');
+    setSyncState('syncing');
     updateChurchStore((prev) => ({
       ...prev,
       ...infoUpdate,
-    }));
+    }), true);
     setLastSyncedAt(new Date());
-    if (!isFirestoreQuotaExceeded) setSyncState('synced');
+    setSyncState('synced');
   }, []);
 
   const addPhoto = useCallback((photoData: Omit<PhotoItem, 'id'>) => {
